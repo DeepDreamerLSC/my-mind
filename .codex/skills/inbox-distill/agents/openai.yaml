@@ -1,0 +1,6 @@
+interface:
+  display_name: "收件箱候选沉淀"
+  short_description: "把单条收件箱内容生成候选提示词"
+  default_prompt: "Use $inbox-distill to turn this my-mind inbox note into a prompt-library candidate, with dry-run first."
+policy:
+  allow_implicit_invocation: true
