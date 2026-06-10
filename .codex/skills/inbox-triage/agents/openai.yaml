@@ -1,0 +1,6 @@
+interface:
+  display_name: "收件箱分拣"
+  short_description: "为待分拣收件箱内容生成沉淀建议"
+  default_prompt: "Use $inbox-triage to review pending my-mind inbox notes and suggest destinations without modifying source notes."
+policy:
+  allow_implicit_invocation: true
