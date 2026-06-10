@@ -10,6 +10,8 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -110,6 +112,35 @@ def run_yt_dlp(url: str) -> tuple[dict[str, Any] | None, str | None]:
         return None, f"yt-dlp 输出不是有效 JSON：{exc}"
 
 
+def youtube_oembed(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    endpoint = "https://www.youtube.com/oembed?format=json&url=" + urllib.parse.quote(url, safe="")
+    try:
+        with urllib.request.urlopen(endpoint, timeout=20) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - keep fallback failure visible in the inbox note.
+        return None, f"YouTube oEmbed 备用解析失败：{exc!r}"
+
+    title = data.get("title") or ""
+    author = data.get("author_name") or ""
+    author_url = data.get("author_url") or ""
+    thumbnail = data.get("thumbnail_url") or ""
+    if not title and not author and not thumbnail:
+        return None, "YouTube oEmbed 未返回可用基础信息"
+
+    return {
+        "title": title,
+        "uploader": author,
+        "author_url": author_url,
+        "thumbnail": thumbnail,
+        "webpage_url": url,
+        "original_url": url,
+        "extractor_key": "YouTube oEmbed",
+        "description": "",
+        "tags": [],
+        "categories": [],
+    }, None
+
+
 def fmt_duration(seconds: Any) -> str:
     if seconds in (None, ""):
         return ""
@@ -160,6 +191,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     platform = guess_platform(url, info)
     title = first_non_empty(info, ["title", "fulltitle", "alt_title"]) or "未命名链接"
     author = first_non_empty(info, ["uploader", "channel", "creator", "artist", "display_id"])
+    author_url = first_non_empty(info, ["author_url", "channel_url", "uploader_url"])
     webpage_url = first_non_empty(info, ["webpage_url", "original_url"]) or url
     publish_date = fmt_upload_date(first_non_empty(info, ["upload_date", "release_date", "timestamp"]))
     duration = fmt_duration(info.get("duration"))
@@ -205,6 +237,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         "",
         f"- 来源平台：{platform}",
         f"- 作者或频道：{author or '未知'}",
+        f"- 作者主页：{author_url or '未知'}",
         f"- 发布时间：{publish_date or '未知'}",
         f"- 时长：{duration or '未知'}",
         f"- 来源链接：{webpage_url}",
@@ -213,7 +246,12 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     ]
 
     if error:
-        body.extend(["", "## 解析失败原因", "", error.strip()])
+        heading = "解析说明" if info else "解析失败原因"
+        body.extend(["", f"## {heading}", ""])
+        if info:
+            body.append("主解析失败，但备用解析补充了部分基础信息。")
+            body.append("")
+        body.append(error.strip())
 
     body.extend(["", "## 简介摘录", "", description or "暂无。"])
 
@@ -284,6 +322,16 @@ def unique_path(directory: Path, filename: str) -> Path:
 
 def capture_url(url: str, inbox: Path, dry_run: bool = False) -> Path:
     info, error = run_yt_dlp(url)
+    if info is None and guess_platform(url) == "YouTube":
+        fallback_info, fallback_error = youtube_oembed(url)
+        if fallback_info is not None:
+            info = fallback_info
+            if error:
+                error = f"yt-dlp 解析失败：{error}\n\n已使用 YouTube oEmbed 备用解析补充基础信息。"
+            else:
+                error = "已使用 YouTube oEmbed 备用解析补充基础信息。"
+        elif fallback_error:
+            error = f"{error}\n\n{fallback_error}" if error else fallback_error
     filename, note = build_note(url, info, error)
     output_path = unique_path(inbox, filename)
     if not dry_run:
