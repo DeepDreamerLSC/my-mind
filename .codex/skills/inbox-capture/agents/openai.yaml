@@ -1,0 +1,7 @@
+interface:
+  display_name: "收件箱录入"
+  short_description: "把链接或片段转成标准收件箱笔记"
+  default_prompt: "Use $inbox-capture to save these links into the my-mind inbox."
+policy:
+  allow_implicit_invocation: true
+
