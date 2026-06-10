@@ -12,6 +12,7 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+from html import unescape as html_unescape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -141,6 +142,179 @@ def youtube_oembed(url: str) -> tuple[dict[str, Any] | None, str | None]:
     }, None
 
 
+def fetch_text(url: str, timeout: int = 30) -> str:
+    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", "ignore")
+
+
+def strip_html(value: str) -> str:
+    value = re.sub(r"<br\s*/?>", "\n", value, flags=re.I)
+    value = re.sub(r"</(p|div|li|h[1-6])>", "\n", value, flags=re.I)
+    value = re.sub(r"<.*?>", " ", value, flags=re.S)
+    value = html_unescape(urllib.parse.unquote(value))
+    value = value.replace("\\u0026", "&")
+    value = value.replace("\\/", "/")
+    return " ".join(value.split())
+
+
+def text_from_youtube_value(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        if "simpleText" in value:
+            return str(value["simpleText"])
+        if isinstance(value.get("runs"), list):
+            return "".join(str(run.get("text", "")) for run in value["runs"])
+        if "content" in value:
+            return str(value["content"])
+    return ""
+
+
+def walk_values(obj: Any, key: str) -> list[Any]:
+    found: list[Any] = []
+    if isinstance(obj, dict):
+        for current_key, value in obj.items():
+            if current_key == key:
+                found.append(value)
+            found.extend(walk_values(value, key))
+    elif isinstance(obj, list):
+        for item in obj:
+            found.extend(walk_values(item, key))
+    return found
+
+
+def extract_json_assignment(html: str, name: str) -> dict[str, Any] | None:
+    pattern = rf"{re.escape(name)}\s*=\s*({{.+?}});</script>"
+    match = re.search(pattern, html, flags=re.S)
+    if not match:
+        pattern = rf"{re.escape(name)}\s*=\s*({{.+?}});"
+        match = re.search(pattern, html, flags=re.S)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+
+def youtube_description_urls(text: str) -> list[str]:
+    text = text.replace("\\u0026", "&").replace("\\/", "/")
+    text = urllib.parse.unquote(text)
+    urls: list[str] = []
+    for match in re.finditer(r"https?://[^\s<>\"]+", text):
+        urls.append(match.group(0).rstrip(").,"))
+    for match in re.finditer(r"q=(https%3A%2F%2F[^&\"\\]+)", text):
+        urls.append(urllib.parse.unquote(match.group(1)))
+    unique: list[str] = []
+    for url in urls:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.netloc.endswith("youtube.com") and parsed.path == "/redirect":
+            query_url = urllib.parse.parse_qs(parsed.query).get("q", [""])[0]
+            if query_url:
+                url = query_url
+        if url not in unique:
+            unique.append(url)
+    return unique
+
+
+def find_transcript_urls(text: str) -> list[str]:
+    return [url for url in youtube_description_urls(text) if "transcript" in url.lower()]
+
+
+def extract_chapter_list_from_html(entry_html: str) -> list[dict[str, str]]:
+    chapters: list[dict[str, str]] = []
+    for match in re.finditer(r'<li><a href="#chapter[^"]+">(.*?)</a></li>', entry_html, flags=re.S):
+        text = strip_html(match.group(1))
+        time_match = re.match(r"(\d{1,2}:\d{2}(?::\d{2})?)\s*[–-]\s*(.+)", text)
+        if time_match:
+            chapters.append({"time": time_match.group(1), "title": time_match.group(2)})
+        elif text:
+            chapters.append({"time": "", "title": text})
+    return chapters
+
+
+def parse_lex_transcript(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        html = fetch_text(url)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"官方转录页读取失败：{exc!r}"
+
+    title_match = re.search(r"<title>(.*?)</title>", html, flags=re.S | re.I)
+    title = strip_html(title_match.group(1)) if title_match else ""
+    published_match = re.search(r'property="article:published_time"\s+content="([^"]+)"', html)
+    published = published_match.group(1) if published_match else ""
+    start = html.find('<div class="entry-content">')
+    end = html.find("</article>", start)
+    entry = html[start:end] if start >= 0 and end > start else html
+    chapters = extract_chapter_list_from_html(entry)
+    segments = re.findall(r'<div class="ts-segment">(.*?)</div>', entry, flags=re.S)
+    transcript_texts: list[str] = []
+    for segment in segments:
+        text_match = re.search(r'<span class="ts-text">(.*?)</span>', segment, flags=re.S)
+        if text_match:
+            transcript_texts.append(strip_html(text_match.group(1)))
+    word_count = sum(len(text.split()) for text in transcript_texts)
+    return {
+        "source": "Lex Fridman 官方 transcript",
+        "url": url if url.endswith("/") else url + "/",
+        "title": title,
+        "published": published,
+        "chapters": chapters,
+        "segment_count": len(transcript_texts),
+        "word_count": word_count,
+    }, None
+
+
+def youtube_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        html = fetch_text(url)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"YouTube 页面读取失败：{exc!r}"
+
+    info: dict[str, Any] = {}
+    initial_data = extract_json_assignment(html, "ytInitialData")
+    if initial_data:
+        descriptions = [text_from_youtube_value(value) for value in walk_values(initial_data, "attributedDescriptionBodyText")]
+        descriptions += [text_from_youtube_value(value) for value in walk_values(initial_data, "attributedDescription")]
+        descriptions = [desc for desc in descriptions if desc]
+        if descriptions:
+            info["description"] = max(descriptions, key=len)
+        title_candidates = [text_from_youtube_value(value) for value in walk_values(initial_data, "title")]
+        title_candidates = [title for title in title_candidates if title and len(title) > 20 and "Like this video" not in title]
+        if title_candidates:
+            info["title"] = title_candidates[0]
+
+    all_text = html
+    if info.get("description"):
+        all_text += "\n" + str(info["description"])
+    transcript_urls = find_transcript_urls(all_text)
+    if transcript_urls:
+        info["external_transcript_url"] = transcript_urls[0]
+        if "lexfridman.com" in transcript_urls[0]:
+            transcript, transcript_error = parse_lex_transcript(transcript_urls[0])
+            if transcript:
+                info["external_transcript"] = transcript
+            elif transcript_error:
+                info["external_transcript_error"] = transcript_error
+
+    return info or None, None
+
+
+def merge_info(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not base and not extra:
+        return None
+    merged = dict(base or {})
+    for key, value in (extra or {}).items():
+        if key not in merged or merged[key] in (None, "", [], {}):
+            merged[key] = value
+        elif key == "description" and len(str(value)) > len(str(merged[key])):
+            merged[key] = value
+        elif key in {"external_transcript", "external_transcript_url", "external_transcript_error"}:
+            merged[key] = value
+    return merged
+
+
 def fmt_duration(seconds: Any) -> str:
     if seconds in (None, ""):
         return ""
@@ -202,9 +376,14 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     tags = info.get("tags") if isinstance(info.get("tags"), list) else []
     subtitles = subtitle_languages(info, "subtitles")
     automatic_captions = subtitle_languages(info, "automatic_captions")
+    external_transcript = info.get("external_transcript") if isinstance(info.get("external_transcript"), dict) else None
+    external_transcript_url = first_non_empty(info, ["external_transcript_url"])
+    external_transcript_error = first_non_empty(info, ["external_transcript_error"])
     parse_status = "已解析" if info and not error else "解析失败"
     if info and error:
         parse_status = "部分解析"
+    if external_transcript and info:
+        parse_status = "已解析"
 
     filename = sanitize_filename_part(f"{now_date()} {platform} - {title}") + ".md"
     body = [
@@ -222,6 +401,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         f"解析工具: {yaml_scalar('yt-dlp' if shutil.which('yt-dlp') else '')}",
         f"解析器: {yaml_scalar(extractor)}",
         f"解析状态: {yaml_scalar(parse_status)}",
+        f"外部转录链接: {yaml_scalar(external_transcript_url or (external_transcript or {}).get('url', ''))}",
+        f"外部转录来源: {yaml_scalar((external_transcript or {}).get('source', ''))}",
         "处理状态: 待分拣",
         "关联项目: []",
         "关联领域: []",
@@ -254,6 +435,31 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         body.append(error.strip())
 
     body.extend(["", "## 简介摘录", "", description or "暂无。"])
+
+    if external_transcript:
+        body.extend(
+            [
+                "",
+                "## 官方转录来源",
+                "",
+                f"- 来源：{external_transcript.get('source', '')}",
+                f"- 链接：{external_transcript.get('url', external_transcript_url)}",
+                f"- 发布时间：{external_transcript.get('published', '') or '未知'}",
+                f"- 章节数：{len(external_transcript.get('chapters', []))}",
+                f"- 转录片段数：{external_transcript.get('segment_count', 0)}",
+                f"- 估算词数：{external_transcript.get('word_count', 0)}",
+                "",
+                "说明：已找到可追溯的官方转录来源。为避免在收件箱中复制超长原文，这里保留来源、目录和解析入口；后续整理时基于该来源生成摘要、关键观点和待验证事实。",
+            ]
+        )
+        chapters = external_transcript.get("chapters", [])
+        if chapters:
+            body.extend(["", "## 章节目录", ""])
+            for chapter in chapters:
+                prefix = f"{chapter.get('time')} - " if chapter.get("time") else ""
+                body.append(f"- {prefix}{chapter.get('title', '')}")
+    elif external_transcript_error:
+        body.extend(["", "## 外部转录解析失败", "", external_transcript_error])
 
     body.extend(["", "## 标签和分类", ""])
     body.append("### 分类")
@@ -324,14 +530,23 @@ def capture_url(url: str, inbox: Path, dry_run: bool = False) -> Path:
     info, error = run_yt_dlp(url)
     if info is None and guess_platform(url) == "YouTube":
         fallback_info, fallback_error = youtube_oembed(url)
+        page_info, page_error = youtube_page_info(url)
+        fallback_info = merge_info(fallback_info, page_info)
         if fallback_info is not None:
             info = fallback_info
             if error:
                 error = f"yt-dlp 解析失败：{error}\n\n已使用 YouTube oEmbed 备用解析补充基础信息。"
             else:
                 error = "已使用 YouTube oEmbed 备用解析补充基础信息。"
+            if page_error:
+                error = f"{error}\n\n{page_error}"
         elif fallback_error:
             error = f"{error}\n\n{fallback_error}" if error else fallback_error
+    elif guess_platform(url, info) == "YouTube":
+        page_info, page_error = youtube_page_info(url)
+        info = merge_info(info, page_info)
+        if page_error:
+            error = f"{error}\n\n{page_error}" if error else page_error
     filename, note = build_note(url, info, error)
     output_path = unique_path(inbox, filename)
     if not dry_run:
