@@ -14,6 +14,8 @@
 解析状态: 已解析
 外部转录链接: "https://lexfridman.com/jensen-huang-transcript"
 外部转录来源: Lex Fridman 官方 transcript
+字幕来源: 
+字幕语言: 
 处理状态: 待分拣
 关联项目: []
 关联领域: []
@@ -48,6 +50,10 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 ## 简介摘录
 
 暂无。
+
+## YouTube 字幕解析说明
+
+已尝试 YouTube 字幕/内置 transcript 路径，但当前环境仍被 YouTube 校验拦截；本条内容最终通过视频描述中的 Lex Fridman 官方 transcript 链接完成内容级解析。
 
 ## 官方转录来源
 

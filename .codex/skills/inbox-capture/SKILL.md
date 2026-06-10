@@ -15,6 +15,7 @@ First version:
 - Detect platform from URL and `yt-dlp` extractor metadata when available.
 - Collect basic information: title, author/channel, publish date, duration, platform, original URL, description excerpt, tags, categories, thumbnail, subtitle availability, parse status, failure reason.
 - For YouTube links, inspect the public watch page for external transcript links. If a Lex Fridman official transcript page is found, extract transcript source metadata, chapter list, segment count, and estimated word count without copying the full transcript.
+- When `yt-dlp` exposes YouTube subtitle URLs, fetch and parse the selected subtitle track to collect source, language, format, segment count, and estimated word count. Do not write subtitle text into the note by default.
 - Write a Chinese Markdown inbox note.
 - Preserve the original URL/content.
 
@@ -23,6 +24,7 @@ Out of scope for first version:
 - Downloading video/audio.
 - Whisper transcription.
 - Copying long copyrighted transcripts into the repository.
+- Copying subtitle text or lyrics into the repository by default.
 - Promoting content into `20_资料库/`, `30_原子笔记/`, or `65_洞察/`.
 - Logging into platforms or using cookies.
 
@@ -56,4 +58,5 @@ python3 .codex/skills/inbox-capture/scripts/capture_link.py "<URL1>" "<URL2>"
 
 - `yt-dlp` works best for YouTube and many public video pages. 抖音、小红书、X may fail or require cookies/login; first version records the failure instead of forcing a risky workaround.
 - When an official transcript source is discovered, keep the source URL and structured metadata, then let later整理/萃取 produce summaries and key points instead of copying the full transcript.
+- When subtitles are parsed, keep only metadata and counts in the inbox note. Later整理/萃取 should produce original summaries rather than storing verbatim subtitle text.
 - If no URL is provided and the user gives plain text, create a regular inbox note manually using the same metadata shape.

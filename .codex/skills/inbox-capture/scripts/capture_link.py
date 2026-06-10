@@ -142,6 +142,18 @@ def youtube_oembed(url: str) -> tuple[dict[str, Any] | None, str | None]:
     }, None
 
 
+def format_ms(ms: Any) -> str:
+    try:
+        total = int(float(ms)) // 1000
+    except (TypeError, ValueError):
+        return ""
+    hours, rem = divmod(total, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:02d}:{seconds:02d}"
+
+
 def fetch_text(url: str, timeout: int = 30) -> str:
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
     with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -156,6 +168,14 @@ def strip_html(value: str) -> str:
     value = value.replace("\\u0026", "&")
     value = value.replace("\\/", "/")
     return " ".join(value.split())
+
+
+def normalize_transcript_text(text: str) -> str:
+    text = html_unescape(text)
+    text = text.replace("\r", "\n")
+    text = re.sub(r"[ \t]+", " ", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()
 
 
 def text_from_youtube_value(value: Any) -> str:
@@ -190,6 +210,16 @@ def extract_json_assignment(html: str, name: str) -> dict[str, Any] | None:
     if not match:
         pattern = rf"{re.escape(name)}\s*=\s*({{.+?}});"
         match = re.search(pattern, html, flags=re.S)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+
+
+def ytcfg_from_html(html: str) -> dict[str, Any] | None:
+    match = re.search(r"ytcfg\.set\(({.+?})\);", html, flags=re.S)
     if not match:
         return None
     try:
@@ -266,6 +296,203 @@ def parse_lex_transcript(url: str) -> tuple[dict[str, Any] | None, str | None]:
     }, None
 
 
+def choose_subtitle_track(info: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
+    language_preferences = ["zh-Hans", "zh-CN", "zh", "zh-TW", "en", "en-US"]
+    source_order = [("手动字幕", info.get("subtitles") or {}), ("自动字幕", info.get("automatic_captions") or {})]
+    ext_preferences = ["json3", "srv3", "ttml", "vtt"]
+    for source_name, subtitles in source_order:
+        if not isinstance(subtitles, dict):
+            continue
+        languages = list(subtitles.keys())
+        ordered_languages = [lang for lang in language_preferences if lang in subtitles]
+        ordered_languages += [lang for lang in languages if lang not in ordered_languages]
+        for language in ordered_languages:
+            tracks = subtitles.get(language) or []
+            if not isinstance(tracks, list):
+                continue
+            for ext in ext_preferences:
+                for track in tracks:
+                    if isinstance(track, dict) and track.get("url") and track.get("ext") == ext:
+                        return source_name, language, track
+    return None
+
+
+def parse_json3_subtitle(payload: str) -> list[dict[str, str]]:
+    data = json.loads(payload)
+    segments: list[dict[str, str]] = []
+    for event in data.get("events", []):
+        pieces = event.get("segs") or []
+        text = "".join(str(piece.get("utf8", "")) for piece in pieces if isinstance(piece, dict))
+        text = normalize_transcript_text(text)
+        if not text:
+            continue
+        segments.append(
+            {
+                "time": format_ms(event.get("tStartMs")),
+                "text": text,
+            }
+        )
+    return segments
+
+
+def parse_vtt_subtitle(payload: str) -> list[dict[str, str]]:
+    segments: list[dict[str, str]] = []
+    blocks = re.split(r"\n\s*\n", payload.replace("\r", "\n"))
+    for block in blocks:
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines or lines[0].upper().startswith("WEBVTT"):
+            continue
+        time = ""
+        text_lines: list[str] = []
+        for line in lines:
+            if "-->" in line:
+                time = line.split("-->", 1)[0].strip().split(".", 1)[0]
+            elif not re.fullmatch(r"\d+", line):
+                text_lines.append(re.sub(r"<[^>]+>", "", line))
+        text = normalize_transcript_text("\n".join(text_lines))
+        if text:
+            segments.append({"time": time, "text": text})
+    return segments
+
+
+def parse_xml_subtitle(payload: str) -> list[dict[str, str]]:
+    segments: list[dict[str, str]] = []
+    for match in re.finditer(r"<text\b([^>]*)>(.*?)</text>", payload, flags=re.S):
+        attrs = match.group(1)
+        start_match = re.search(r'start="([^"]+)"', attrs)
+        text = strip_html(match.group(2))
+        if text:
+            segments.append({"time": fmt_duration(start_match.group(1)) if start_match else "", "text": text})
+    if segments:
+        return segments
+    text = strip_html(payload)
+    return [{"time": "", "text": text}] if text else []
+
+
+def summarize_subtitle_segments(
+    *,
+    source: str,
+    language: str,
+    ext: str,
+    url: str,
+    segments: list[dict[str, str]],
+) -> dict[str, Any]:
+    plain_text = normalize_transcript_text("\n".join(segment["text"] for segment in segments))
+    return {
+        "source": source,
+        "language": language,
+        "format": ext,
+        "url": url,
+        "segment_count": len(segments),
+        "word_count": len(plain_text.split()),
+    }
+
+
+def fetch_subtitle_track(track: dict[str, Any]) -> tuple[list[dict[str, str]], str | None]:
+    url = str(track.get("url") or "")
+    ext = str(track.get("ext") or "")
+    if not url:
+        return [], "字幕轨道缺少 URL"
+    try:
+        payload = fetch_text(url, timeout=30)
+    except Exception as exc:  # noqa: BLE001
+        return [], f"字幕 URL 读取失败：{exc!r}"
+    try:
+        if ext == "json3":
+            return parse_json3_subtitle(payload), None
+        if ext == "vtt":
+            return parse_vtt_subtitle(payload), None
+        if ext in {"srv3", "ttml", "xml"}:
+            return parse_xml_subtitle(payload), None
+        return parse_vtt_subtitle(payload) or parse_xml_subtitle(payload), None
+    except Exception as exc:  # noqa: BLE001
+        return [], f"字幕解析失败：{exc!r}"
+
+
+def attach_yt_dlp_subtitle(info: dict[str, Any]) -> None:
+    if info.get("youtube_subtitle"):
+        return
+    chosen = choose_subtitle_track(info)
+    if not chosen:
+        return
+    source_name, language, track = chosen
+    segments, error = fetch_subtitle_track(track)
+    if error:
+        info["youtube_subtitle_error"] = error
+        return
+    if segments:
+        info["youtube_subtitle"] = summarize_subtitle_segments(
+            source=source_name,
+            language=language,
+            ext=str(track.get("ext") or ""),
+            url=str(track.get("url") or ""),
+            segments=segments,
+        )
+
+
+def extract_innertube_transcript_params(html: str) -> str:
+    match = re.search(r'"getTranscriptEndpoint"\s*:\s*\{"params":"([^"]+)"', html)
+    return match.group(1) if match else ""
+
+
+def parse_innertube_transcript_segments(data: dict[str, Any]) -> list[dict[str, str]]:
+    renderers = walk_values(data, "transcriptSegmentRenderer")
+    segments: list[dict[str, str]] = []
+    for renderer in renderers:
+        if not isinstance(renderer, dict):
+            continue
+        text = text_from_youtube_value(renderer.get("snippet"))
+        start_ms = renderer.get("startMs")
+        if not start_ms:
+            start_ms = renderer.get("startTimeMs")
+        text = normalize_transcript_text(text)
+        if text:
+            segments.append({"time": format_ms(start_ms), "text": text})
+    return segments
+
+
+def fetch_innertube_transcript(html: str, watch_url: str) -> tuple[dict[str, Any] | None, str | None]:
+    cfg = ytcfg_from_html(html)
+    params = extract_innertube_transcript_params(html)
+    if not cfg or not params:
+        return None, "YouTube 页面未暴露 transcript endpoint 参数"
+    api_key = cfg.get("INNERTUBE_API_KEY")
+    context = cfg.get("INNERTUBE_CONTEXT")
+    if not api_key or not context:
+        return None, "YouTube 页面缺少 Innertube API key 或 context"
+    body = json.dumps({"context": context, "params": params}).encode("utf-8")
+    endpoint = f"https://www.youtube.com/youtubei/v1/get_transcript?key={api_key}"
+    request = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0",
+            "Origin": "https://www.youtube.com",
+            "Referer": watch_url,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = response.read().decode("utf-8", "ignore")
+    except Exception as exc:  # noqa: BLE001
+        return None, f"YouTube 内置 transcript 接口失败：{exc!r}"
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        return None, f"YouTube 内置 transcript 返回非 JSON：{exc}"
+    segments = parse_innertube_transcript_segments(data)
+    if not segments:
+        return None, "YouTube 内置 transcript 未返回可解析片段"
+    return summarize_subtitle_segments(
+        source="YouTube 内置 transcript",
+        language="unknown",
+        ext="innertube",
+        url=watch_url,
+        segments=segments,
+    ), None
+
+
 def youtube_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
     try:
         html = fetch_text(url)
@@ -284,6 +511,12 @@ def youtube_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
         title_candidates = [title for title in title_candidates if title and len(title) > 20 and "Like this video" not in title]
         if title_candidates:
             info["title"] = title_candidates[0]
+
+    innertube_transcript, innertube_error = fetch_innertube_transcript(html, url)
+    if innertube_transcript:
+        info["youtube_subtitle"] = innertube_transcript
+    elif innertube_error:
+        info["youtube_subtitle_error"] = innertube_error
 
     all_text = html
     if info.get("description"):
@@ -310,7 +543,7 @@ def merge_info(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dic
             merged[key] = value
         elif key == "description" and len(str(value)) > len(str(merged[key])):
             merged[key] = value
-        elif key in {"external_transcript", "external_transcript_url", "external_transcript_error"}:
+        elif key in {"external_transcript", "external_transcript_url", "external_transcript_error", "youtube_subtitle", "youtube_subtitle_error"}:
             merged[key] = value
     return merged
 
@@ -376,6 +609,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     tags = info.get("tags") if isinstance(info.get("tags"), list) else []
     subtitles = subtitle_languages(info, "subtitles")
     automatic_captions = subtitle_languages(info, "automatic_captions")
+    youtube_subtitle = info.get("youtube_subtitle") if isinstance(info.get("youtube_subtitle"), dict) else None
+    youtube_subtitle_error = first_non_empty(info, ["youtube_subtitle_error"])
     external_transcript = info.get("external_transcript") if isinstance(info.get("external_transcript"), dict) else None
     external_transcript_url = first_non_empty(info, ["external_transcript_url"])
     external_transcript_error = first_non_empty(info, ["external_transcript_error"])
@@ -383,6 +618,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     if info and error:
         parse_status = "部分解析"
     if external_transcript and info:
+        parse_status = "已解析"
+    if youtube_subtitle and info:
         parse_status = "已解析"
 
     filename = sanitize_filename_part(f"{now_date()} {platform} - {title}") + ".md"
@@ -403,6 +640,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         f"解析状态: {yaml_scalar(parse_status)}",
         f"外部转录链接: {yaml_scalar(external_transcript_url or (external_transcript or {}).get('url', ''))}",
         f"外部转录来源: {yaml_scalar((external_transcript or {}).get('source', ''))}",
+        f"字幕来源: {yaml_scalar((youtube_subtitle or {}).get('source', ''))}",
+        f"字幕语言: {yaml_scalar((youtube_subtitle or {}).get('language', ''))}",
         "处理状态: 待分拣",
         "关联项目: []",
         "关联领域: []",
@@ -435,6 +674,24 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         body.append(error.strip())
 
     body.extend(["", "## 简介摘录", "", description or "暂无。"])
+
+    if youtube_subtitle:
+        body.extend(
+            [
+                "",
+                "## YouTube 字幕解析",
+                "",
+                f"- 来源：{youtube_subtitle.get('source', '')}",
+                f"- 语言：{youtube_subtitle.get('language', '')}",
+                f"- 格式：{youtube_subtitle.get('format', '')}",
+                f"- 字幕片段数：{youtube_subtitle.get('segment_count', 0)}",
+                f"- 估算词数：{youtube_subtitle.get('word_count', 0)}",
+                "",
+                "说明：已成功解析字幕轨道。为避免在收件箱阶段复制长篇原文或歌词，这里只保留字幕来源和统计信息；后续整理时基于该来源生成摘要、关键观点和待验证事实。",
+            ]
+        )
+    elif youtube_subtitle_error:
+        body.extend(["", "## YouTube 字幕解析失败", "", youtube_subtitle_error])
 
     if external_transcript:
         body.extend(
@@ -528,6 +785,8 @@ def unique_path(directory: Path, filename: str) -> Path:
 
 def capture_url(url: str, inbox: Path, dry_run: bool = False) -> Path:
     info, error = run_yt_dlp(url)
+    if info and guess_platform(url, info) == "YouTube":
+        attach_yt_dlp_subtitle(info)
     if info is None and guess_platform(url) == "YouTube":
         fallback_info, fallback_error = youtube_oembed(url)
         page_info, page_error = youtube_page_info(url)
@@ -545,6 +804,8 @@ def capture_url(url: str, inbox: Path, dry_run: bool = False) -> Path:
     elif guess_platform(url, info) == "YouTube":
         page_info, page_error = youtube_page_info(url)
         info = merge_info(info, page_info)
+        if info:
+            attach_yt_dlp_subtitle(info)
         if page_error:
             error = f"{error}\n\n{page_error}" if error else page_error
     filename, note = build_note(url, info, error)
