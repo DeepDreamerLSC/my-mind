@@ -2437,6 +2437,51 @@ TRADITIONAL_CHAR_MAP = str.maketrans(
     }
 )
 
+TRANSCRIPT_TERM_REPLACEMENTS: tuple[tuple[str, str], ...] = (
+    ("OpenAI走财任证", "OpenAI 官方认证"),
+    ("写交本来按升升PCBT", "写脚本、生成 PPT"),
+    ("像我们想让你的", "想不想让你的"),
+    ("原来的充电", "越用越聪明"),
+    ("扣袋子", "Codex"),
+    ("扣带子", "Codex"),
+    ("扣代子", "Codex"),
+    ("扣戴子", "Codex"),
+    ("酷袋子", "Codex"),
+    ("口袋子", "Codex"),
+    ("扣代码", "Codex"),
+    ("CodeX", "Codex"),
+    ("ChagbT", "ChatGPT"),
+    ("ChagBT", "ChatGPT"),
+    ("Chat GBT", "ChatGPT"),
+    ("ChatGPT.G号", "ChatGPT 账号"),
+    ("Openen", "OpenAI"),
+    ("Open AI", "OpenAI"),
+    ("open ai", "OpenAI"),
+    ("GBT", "GPT"),
+    ("GPD", "GPT"),
+    ("Tz", "提示词"),
+    ("TZ", "提示词"),
+    ("PCBT", "PPT"),
+    ("PBT", "PPT"),
+    ("PPD", "PPT"),
+    ("过动方式", "工作方式"),
+    ("重复做的是", "重复做的事"),
+    ("什么次用", "生成 Skill"),
+    ("成为次用", "沉淀成 Skill"),
+    ("次用", "Skill"),
+    ("做动化", "自动化"),
+    ("重褒跑", "重复跑"),
+    ("走财任证", "官方认证"),
+    ("交本", "脚本"),
+    ("升升", "生成"),
+    ("高层在用", "高频在用"),
+    ("建议实施", "建议试试"),
+    ("它别的地方不是", "它的价值不是"),
+    ("知道帮你", "自动帮你"),
+    ("更是提醒", "每日提醒"),
+    ("在比如", "再比如"),
+)
+
 
 def now_date() -> str:
     return dt.datetime.now(TZ).strftime("%Y-%m-%d")
@@ -2757,6 +2802,14 @@ def to_simplified_chinese(text: str) -> str:
     return text.translate(TRADITIONAL_CHAR_MAP)
 
 
+def normalize_transcript_terms(text: str) -> str:
+    for source, target in TRANSCRIPT_TERM_REPLACEMENTS:
+        text = text.replace(source, target)
+    text = re.sub(r"\bT\s*Z\b", "提示词", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bP\s*C\s*B\s*T\b", "PPT", text, flags=re.IGNORECASE)
+    return text
+
+
 def extract_hashtags(text: str) -> list[str]:
     tags: list[str] = []
     for match in re.finditer(r"#([^#\s，,。；;：:!！?？]+)", text or ""):
@@ -2778,7 +2831,8 @@ def normalize_cjk_text(text: str) -> str:
     text = html_unescape(text).replace("\r", "\n")
     text = re.sub(r"[ \t\u00a0]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-    return to_simplified_chinese(text.strip())
+    text = to_simplified_chinese(text.strip())
+    return normalize_transcript_terms(text)
 
 
 def split_sentences(text: str) -> list[str]:

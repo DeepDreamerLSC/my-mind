@@ -18,7 +18,7 @@ First version:
 - When `yt-dlp` exposes YouTube subtitle URLs, fetch and parse the selected subtitle track to collect source, language, format, segment count, and estimated word count. Do not write subtitle text into the note by default.
 - For public 抖音 share links, resolve the short link and parse the mobile public page for title/copy, author, publish date, duration, cover, public media URL, content ID, and interaction counts when available.
 - For public 小红书 share links, resolve the short link and parse the public note page/initial state for title, note copy, author, publish date, cover, note ID, image count, and interaction counts when available.
-- When explicitly requested with `--extract-content`, extract audio from a public media URL with `ffmpeg`, transcribe with an available backend, normalize transcription output to Simplified Chinese, then write a content summary, key points, full timeline excerpt, and full transcription excerpt.
+- When explicitly requested with `--extract-content`, extract audio from a public media URL with `ffmpeg`, transcribe with an available backend, normalize transcription output to Simplified Chinese, apply a small glossary for common AI/product terms such as Codex, OpenAI, Skill, Prompt, and PPT, then write a content summary, key points, full timeline excerpt, and full transcription excerpt.
 - Write a Chinese Markdown inbox note.
 - Preserve the original URL/content.
 
@@ -72,5 +72,6 @@ python3 .codex/skills/inbox-capture/scripts/capture_link.py --extract-content --
 - 抖音/小红书公开页字段会随平台页面结构变化而波动；若公开页不暴露字段，保留链接和失败说明，不使用登录态或 cookie。
 - Content extraction needs `ffmpeg` plus a transcription backend. The script auto-detects `whisper` CLI, installed `faster-whisper`, or `~/.cache/my-mind/faster-whisper-venv/bin/python`.
 - `tiny` is useful for quick validation but has many Chinese recognition errors. Use `small` or `medium` when the extracted content needs to be promoted into long-term knowledge.
+- If ASR phonetically misreads product terms (for example Codex as Chinese-sounding words), add conservative corrections to the transcript glossary rather than manually fixing each future note.
 - `--extract-content` intentionally removes transcript excerpt length limits after the user asks for full paragraphs; use it only for content that should be inspected in the inbox.
 - If no URL is provided and the user gives plain text, create a regular inbox note manually using the same metadata shape.
