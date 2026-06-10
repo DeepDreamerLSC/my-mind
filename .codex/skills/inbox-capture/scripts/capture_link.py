@@ -22,6 +22,24 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_INBOX = ROOT / "00_收件箱"
 TZ = ZoneInfo("Asia/Shanghai")
+DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+DOUYIN_MOBILE_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+        "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+    ),
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
+XHS_DESKTOP_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+}
 
 
 def now_date() -> str:
@@ -65,7 +83,7 @@ def guess_platform(url: str, info: dict[str, Any] | None = None) -> str:
         return "YouTube"
     if extractor_l in {"twitter", "x"} or "twitter.com" in host or "x.com" in host:
         return "X"
-    if "douyin" in extractor_l or "douyin.com" in host:
+    if "douyin" in extractor_l or "douyin.com" in host or "iesdouyin.com" in host:
         return "抖音"
     if "xiaohongshu" in extractor_l or "xiaohongshu.com" in host or "xhslink.com" in host:
         return "小红书"
@@ -154,10 +172,16 @@ def format_ms(ms: Any) -> str:
     return f"{minutes:02d}:{seconds:02d}"
 
 
-def fetch_text(url: str, timeout: int = 30) -> str:
-    request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+def fetch_text(url: str, timeout: int = 30, headers: dict[str, str] | None = None) -> str:
+    request = urllib.request.Request(url, headers=headers or DEFAULT_HEADERS)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read().decode("utf-8", "ignore")
+
+
+def fetch_html(url: str, headers: dict[str, str] | None = None, timeout: int = 30) -> tuple[str, str]:
+    request = urllib.request.Request(url, headers=headers or DEFAULT_HEADERS)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read().decode("utf-8", "ignore"), response.geturl()
 
 
 def strip_html(value: str) -> str:
@@ -168,6 +192,148 @@ def strip_html(value: str) -> str:
     value = value.replace("\\u0026", "&")
     value = value.replace("\\/", "/")
     return " ".join(value.split())
+
+
+def clean_url(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    text = html_unescape(str(value)).replace("\\u002F", "/").replace("\\/", "/").strip()
+    if text.startswith("//"):
+        return "https:" + text
+    return text
+
+
+def parse_html_attrs(tag: str) -> dict[str, str]:
+    attrs: dict[str, str] = {}
+    for match in re.finditer(r"([:\w-]+)\s*=\s*(\"([^\"]*)\"|'([^']*)'|([^\s\"'>/]+))", tag):
+        value = next(group for group in match.groups()[2:] if group is not None)
+        attrs[match.group(1).lower()] = html_unescape(value)
+    return attrs
+
+
+def html_metadata(html: str) -> dict[str, str]:
+    metadata: dict[str, str] = {}
+    title_match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.S | re.I)
+    if title_match:
+        metadata["title"] = strip_html(title_match.group(1))
+
+    for match in re.finditer(r"<meta\b[^>]*>", html, flags=re.I):
+        attrs = parse_html_attrs(match.group(0))
+        key = (attrs.get("name") or attrs.get("property") or attrs.get("itemprop") or "").lower()
+        content = attrs.get("content")
+        if key and content and key not in metadata:
+            metadata[key] = html_unescape(content).replace("\\u002F", "/").replace("\\/", "/").strip()
+
+    for match in re.finditer(r"<link\b[^>]*>", html, flags=re.I):
+        attrs = parse_html_attrs(match.group(0))
+        rel = (attrs.get("rel") or "").lower()
+        href = attrs.get("href")
+        if href and "canonical" in rel:
+            metadata["canonical"] = clean_url(href)
+    return metadata
+
+
+def first_html_image(html: str) -> str:
+    for match in re.finditer(r"<img\b[^>]*>", html, flags=re.I):
+        attrs = parse_html_attrs(match.group(0))
+        src = attrs.get("src") or attrs.get("data-src")
+        if src:
+            return clean_url(src)
+    return ""
+
+
+def script_assignment_json(html: str, assignment: str) -> dict[str, Any] | None:
+    for match in re.finditer(r"<script\b[^>]*>(.*?)</script>", html, flags=re.S | re.I):
+        script = match.group(1)
+        index = script.find(assignment)
+        if index < 0:
+            continue
+        payload = script[index + len(assignment) :].strip()
+        if payload.startswith("="):
+            payload = payload[1:].strip()
+        payload = payload.rstrip("; \n\t")
+        payload = re.sub(r"(?<=[:\[,])undefined(?=[,\}\]])", "null", payload)
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def first_item_from_key(obj: Any, key: str) -> dict[str, Any] | None:
+    if isinstance(obj, dict):
+        value = obj.get(key)
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    return item
+        for child in obj.values():
+            found = first_item_from_key(child, key)
+            if found:
+                return found
+    elif isinstance(obj, list):
+        for child in obj:
+            found = first_item_from_key(child, key)
+            if found:
+                return found
+    return None
+
+
+def first_url_from_media(value: Any) -> str:
+    if isinstance(value, dict):
+        url = value.get("url")
+        if url:
+            return clean_url(url)
+        url_list = value.get("url_list")
+        if isinstance(url_list, list):
+            for item in url_list:
+                url = clean_url(item)
+                if url:
+                    return url
+        info_list = value.get("infoList")
+        if isinstance(info_list, list):
+            for item in info_list:
+                url = first_url_from_media(item)
+                if url:
+                    return url
+        for nested_key in ("cover", "origin_cover", "dynamic_cover", "avatar_thumb", "avatar_medium"):
+            url = first_url_from_media(value.get(nested_key))
+            if url:
+                return url
+    elif isinstance(value, list):
+        for item in value:
+            url = first_url_from_media(item)
+            if url:
+                return url
+    return ""
+
+
+def timestamp_upload_date(value: Any) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        timestamp = int(float(value))
+    except (TypeError, ValueError):
+        return ""
+    if timestamp > 10_000_000_000:
+        timestamp //= 1000
+    return dt.datetime.fromtimestamp(timestamp, TZ).strftime("%Y%m%d")
+
+
+def clean_social_title(value: str, suffix: str) -> str:
+    title = strip_html(value)
+    if suffix and title.endswith(suffix):
+        title = title[: -len(suffix)].strip()
+    return title
+
+
+def extract_hashtags(text: str) -> list[str]:
+    tags: list[str] = []
+    for match in re.finditer(r"#([^#\s，,。；;：:!！?？]+)", text or ""):
+        tag = match.group(1).replace("[话题]", "").strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    return tags
 
 
 def normalize_transcript_text(text: str) -> str:
@@ -534,6 +700,213 @@ def youtube_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
     return info or None, None
 
 
+def douyin_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        html, final_url = fetch_html(url, headers=DOUYIN_MOBILE_HEADERS)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"抖音公开页读取失败：{exc!r}"
+
+    metadata = html_metadata(html)
+    router_data = script_assignment_json(html, "window._ROUTER_DATA")
+    item = first_item_from_key(router_data, "item_list") if router_data else None
+    description = str(metadata.get("description") or "")
+    title = clean_social_title(metadata.get("title") or "", " - 抖音")
+    canonical = clean_url(metadata.get("canonical")) or final_url
+    thumbnail = first_html_image(html)
+    author = ""
+    upload_date = ""
+    like_count = ""
+    comment_count = ""
+    share_count = ""
+    collect_count = ""
+    duration = ""
+    content_id = ""
+    author_id = ""
+    author_url = ""
+    tags: list[str] = []
+
+    if isinstance(item, dict):
+        content_id = str(item.get("aweme_id") or item.get("group_id_str") or "")
+        title = str(item.get("desc") or title).strip()
+        description = title or description
+        upload_date = timestamp_upload_date(item.get("create_time"))
+        author_data = item.get("author") if isinstance(item.get("author"), dict) else {}
+        author = str(author_data.get("nickname") or "")
+        author_id = str(author_data.get("short_id") or author_data.get("unique_id") or author_data.get("sec_uid") or "")
+        if author_data.get("sec_uid"):
+            author_url = f"https://www.douyin.com/user/{author_data.get('sec_uid')}"
+        statistics = item.get("statistics") if isinstance(item.get("statistics"), dict) else {}
+        like_count = str(statistics.get("digg_count") or "")
+        comment_count = str(statistics.get("comment_count") or "")
+        share_count = str(statistics.get("share_count") or "")
+        collect_count = str(statistics.get("collect_count") or "")
+        video_data = item.get("video") if isinstance(item.get("video"), dict) else {}
+        thumbnail = first_url_from_media(video_data.get("cover")) or first_url_from_media(item.get("images")) or thumbnail
+        raw_duration = video_data.get("duration")
+        if raw_duration not in (None, ""):
+            try:
+                duration_value = float(raw_duration)
+                duration = str(duration_value / 1000 if duration_value > 10_000 else duration_value)
+            except (TypeError, ValueError):
+                duration = str(raw_duration)
+        cha_list = item.get("cha_list") if isinstance(item.get("cha_list"), list) else []
+        for cha in cha_list:
+            if isinstance(cha, dict) and cha.get("cha_name"):
+                tags.append(str(cha["cha_name"]))
+
+    if not author and description:
+        author_match = re.search(r"\s-\s(.+?)于(\d{8})发布在抖音", description)
+        if author_match:
+            author = author_match.group(1).strip()
+            upload_date = upload_date or author_match.group(2)
+    if not like_count and description:
+        like_match = re.search(r"收获了(\d+)个喜欢", description)
+        if like_match:
+            like_count = like_match.group(1)
+
+    tags = tags + [tag for tag in extract_hashtags(description or title) if tag not in tags]
+    if not title and description:
+        title = description.split(" - ", 1)[0].strip()
+    if not content_id:
+        id_match = re.search(r"/(?:share/)?video/(\d+)", canonical or final_url)
+        content_id = id_match.group(1) if id_match else ""
+
+    if not any([title, description, author, thumbnail, content_id]):
+        return None, "抖音公开页未暴露可用基础信息"
+
+    return {
+        "id": content_id,
+        "title": title or "抖音作品",
+        "description": description,
+        "uploader": author,
+        "uploader_id": author_id,
+        "uploader_url": author_url,
+        "upload_date": upload_date,
+        "duration": duration,
+        "thumbnail": thumbnail,
+        "webpage_url": canonical,
+        "original_url": url,
+        "extractor_key": "Douyin HTML",
+        "parse_tool": "公开页面 HTML",
+        "tags": tags,
+        "categories": [],
+        "like_count": like_count,
+        "comment_count": comment_count,
+        "share_count": share_count,
+        "collect_count": collect_count,
+        "platform_meta": {
+            "真实链接": final_url,
+            "作品编号": content_id,
+            "作者编号": author_id,
+            "点赞数": like_count,
+            "评论数": comment_count,
+            "收藏数": collect_count,
+            "分享数": share_count,
+            "封面图": thumbnail,
+        },
+    }, None
+
+
+def xiaohongshu_note_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    note_map = (((state.get("note") or {}).get("noteDetailMap") or {}) if isinstance(state, dict) else {})
+    if isinstance(note_map, dict):
+        for entry in note_map.values():
+            if isinstance(entry, dict) and isinstance(entry.get("note"), dict):
+                return entry["note"]
+    return None
+
+
+def xiaohongshu_image_url(note: dict[str, Any], metadata: dict[str, str]) -> str:
+    image_list = note.get("imageList") if isinstance(note.get("imageList"), list) else []
+    for image in image_list:
+        url = first_url_from_media(image)
+        if url:
+            return url
+    return clean_url(metadata.get("og:image") or "")
+
+
+def xiaohongshu_tags(note: dict[str, Any], description: str) -> list[str]:
+    tags: list[str] = []
+    tag_list = note.get("tagList") if isinstance(note.get("tagList"), list) else []
+    for item in tag_list:
+        if isinstance(item, dict):
+            tag = str(item.get("name") or item.get("title") or "").strip()
+        else:
+            tag = str(item).strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    tags.extend(tag for tag in extract_hashtags(description) if tag not in tags)
+    return tags
+
+
+def xiaohongshu_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    try:
+        html, final_url = fetch_html(url, headers=XHS_DESKTOP_HEADERS)
+    except Exception as exc:  # noqa: BLE001
+        return None, f"小红书公开页读取失败：{exc!r}"
+
+    metadata = html_metadata(html)
+    state = script_assignment_json(html, "window.__INITIAL_STATE__")
+    note = xiaohongshu_note_from_state(state or {}) or {}
+    interact = note.get("interactInfo") if isinstance(note.get("interactInfo"), dict) else {}
+    user = note.get("user") if isinstance(note.get("user"), dict) else {}
+    description = str(note.get("desc") or metadata.get("description") or "")
+    title = str(note.get("title") or clean_social_title(metadata.get("og:title") or metadata.get("title") or "", " - 小红书"))
+    note_id = str(note.get("noteId") or "")
+    if not note_id:
+        id_match = re.search(r"/(?:explore|discovery/item)/([0-9a-fA-F]+)", metadata.get("og:url") or final_url)
+        note_id = id_match.group(1) if id_match else ""
+    canonical = clean_url(metadata.get("og:url") or final_url)
+    like_count = str(interact.get("likedCount") or metadata.get("og:xhs:note_like") or "")
+    comment_count = str(interact.get("commentCount") or metadata.get("og:xhs:note_comment") or "")
+    collect_count = str(interact.get("collectedCount") or metadata.get("og:xhs:note_collect") or "")
+    share_count = str(interact.get("shareCount") or "")
+    author = str(user.get("nickname") or "")
+    author_id = str(user.get("userId") or "")
+    author_url = f"https://www.xiaohongshu.com/user/profile/{author_id}" if author_id else ""
+    thumbnail = xiaohongshu_image_url(note, metadata)
+    upload_date = timestamp_upload_date(note.get("time"))
+    note_type = str(note.get("type") or "")
+    image_count = len(note.get("imageList") or []) if isinstance(note.get("imageList"), list) else ""
+    tags = xiaohongshu_tags(note, description)
+
+    if not any([title, description, author, thumbnail, note_id]):
+        return None, "小红书公开页未暴露可用基础信息"
+
+    return {
+        "id": note_id,
+        "title": title or "小红书笔记",
+        "description": description,
+        "uploader": author,
+        "uploader_id": author_id,
+        "uploader_url": author_url,
+        "upload_date": upload_date,
+        "thumbnail": thumbnail,
+        "webpage_url": canonical,
+        "original_url": url,
+        "extractor_key": "XiaoHongShu HTML",
+        "parse_tool": "公开页面 HTML",
+        "tags": tags,
+        "categories": [],
+        "like_count": like_count,
+        "comment_count": comment_count,
+        "share_count": share_count,
+        "collect_count": collect_count,
+        "platform_meta": {
+            "真实链接": final_url,
+            "笔记编号": note_id,
+            "作者编号": author_id,
+            "笔记类型": note_type,
+            "图片数": image_count,
+            "点赞数": like_count,
+            "评论数": comment_count,
+            "收藏数": collect_count,
+            "分享数": share_count,
+            "封面图": thumbnail,
+        },
+    }, None
+
+
 def merge_info(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
     if not base and not extra:
         return None
@@ -545,6 +918,9 @@ def merge_info(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dic
             merged[key] = value
         elif key in {"external_transcript", "external_transcript_url", "external_transcript_error", "youtube_subtitle", "youtube_subtitle_error"}:
             merged[key] = value
+        elif key == "platform_meta" and isinstance(value, dict):
+            current = merged.get(key) if isinstance(merged.get(key), dict) else {}
+            merged[key] = {**current, **value}
     return merged
 
 
@@ -596,6 +972,7 @@ def subtitle_languages(info: dict[str, Any], key: str) -> list[str]:
 def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tuple[str, str]:
     info = info or {}
     platform = guess_platform(url, info)
+    material_type = "社媒链接" if platform in {"抖音", "小红书", "X", "TikTok"} else "视频链接"
     title = first_non_empty(info, ["title", "fulltitle", "alt_title"]) or "未命名链接"
     author = first_non_empty(info, ["uploader", "channel", "creator", "artist", "display_id"])
     author_url = first_non_empty(info, ["author_url", "channel_url", "uploader_url"])
@@ -605,6 +982,14 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     description = excerpt(str(info.get("description") or ""))
     thumbnail = first_non_empty(info, ["thumbnail"])
     extractor = first_non_empty(info, ["extractor_key", "extractor"])
+    parse_tool = first_non_empty(info, ["parse_tool"]) or ("yt-dlp" if shutil.which("yt-dlp") else "")
+    content_id = first_non_empty(info, ["id", "display_id", "aweme_id", "note_id"])
+    author_id = first_non_empty(info, ["uploader_id", "channel_id", "creator_id"])
+    like_count = first_non_empty(info, ["like_count", "digg_count"])
+    comment_count = first_non_empty(info, ["comment_count"])
+    collect_count = first_non_empty(info, ["collect_count", "repost_count"])
+    share_count = first_non_empty(info, ["share_count"])
+    platform_meta = info.get("platform_meta") if isinstance(info.get("platform_meta"), dict) else {}
     categories = info.get("categories") if isinstance(info.get("categories"), list) else []
     tags = info.get("tags") if isinstance(info.get("tags"), list) else []
     subtitles = subtitle_languages(info, "subtitles")
@@ -614,6 +999,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     external_transcript = info.get("external_transcript") if isinstance(info.get("external_transcript"), dict) else None
     external_transcript_url = first_non_empty(info, ["external_transcript_url"])
     external_transcript_error = first_non_empty(info, ["external_transcript_error"])
+    parse_notice = first_non_empty(info, ["parse_notice"])
     parse_status = "已解析" if info and not error else "解析失败"
     if info and error:
         parse_status = "部分解析"
@@ -626,16 +1012,23 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     body = [
         "---",
         "类别: 收件箱",
-        "资料类型: 视频链接",
+        f"资料类型: {yaml_scalar(material_type)}",
         f"来源平台: {yaml_scalar(platform)}",
         f"标题: {yaml_scalar(title)}",
         f"作者或频道: {yaml_scalar(author)}",
+        f"作者编号: {yaml_scalar(author_id)}",
         f"发布时间: {yaml_scalar(publish_date)}",
         f"捕获时间: {yaml_scalar(now_datetime())}",
         f"来源链接: {yaml_scalar(webpage_url)}",
         f"原始链接: {yaml_scalar(url)}",
+        f"内容编号: {yaml_scalar(content_id)}",
         f"时长: {yaml_scalar(duration)}",
-        f"解析工具: {yaml_scalar('yt-dlp' if shutil.which('yt-dlp') else '')}",
+        f"封面图: {yaml_scalar(thumbnail)}",
+        f"点赞数: {yaml_scalar(like_count)}",
+        f"评论数: {yaml_scalar(comment_count)}",
+        f"收藏数: {yaml_scalar(collect_count)}",
+        f"分享数: {yaml_scalar(share_count)}",
+        f"解析工具: {yaml_scalar(parse_tool)}",
         f"解析器: {yaml_scalar(extractor)}",
         f"解析状态: {yaml_scalar(parse_status)}",
         f"外部转录链接: {yaml_scalar(external_transcript_url or (external_transcript or {}).get('url', ''))}",
@@ -647,7 +1040,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         "关联领域: []",
         "主题: []",
         "标签:",
-        *yaml_list(["视频链接", platform]),
+        *yaml_list([material_type, platform]),
         "敏感状态: 未知",
         "---",
         "",
@@ -657,13 +1050,37 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         "",
         f"- 来源平台：{platform}",
         f"- 作者或频道：{author or '未知'}",
+        f"- 作者编号：{author_id or '未知'}",
         f"- 作者主页：{author_url or '未知'}",
         f"- 发布时间：{publish_date or '未知'}",
         f"- 时长：{duration or '未知'}",
         f"- 来源链接：{webpage_url}",
+        f"- 内容编号：{content_id or '未知'}",
         f"- 缩略图：{thumbnail or '无'}",
         f"- 解析状态：{parse_status}",
     ]
+
+    if parse_notice:
+        body.extend(["", "## 解析说明", "", parse_notice.strip()])
+
+    platform_lines = [
+        ("真实链接", platform_meta.get("真实链接")),
+        ("作品编号", platform_meta.get("作品编号")),
+        ("笔记编号", platform_meta.get("笔记编号")),
+        ("作者编号", platform_meta.get("作者编号") or author_id),
+        ("笔记类型", platform_meta.get("笔记类型")),
+        ("图片数", platform_meta.get("图片数")),
+        ("点赞数", platform_meta.get("点赞数") or like_count),
+        ("评论数", platform_meta.get("评论数") or comment_count),
+        ("收藏数", platform_meta.get("收藏数") or collect_count),
+        ("分享数", platform_meta.get("分享数") or share_count),
+        ("封面图", platform_meta.get("封面图") or thumbnail),
+    ]
+    platform_lines = [(label, value) for label, value in platform_lines if value not in (None, "", [])]
+    if platform_lines:
+        body.extend(["", "## 平台信息", ""])
+        for label, value in platform_lines:
+            body.append(f"- {label}：{value}")
 
     if error:
         heading = "解析说明" if info else "解析失败原因"
@@ -673,7 +1090,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
             body.append("")
         body.append(error.strip())
 
-    body.extend(["", "## 简介摘录", "", description or "暂无。"])
+    excerpt_heading = "文案摘录" if platform in {"抖音", "小红书", "X", "TikTok"} else "简介摘录"
+    body.extend(["", f"## {excerpt_heading}", "", description or "暂无。"])
 
     if youtube_subtitle:
         body.extend(
@@ -785,7 +1203,8 @@ def unique_path(directory: Path, filename: str) -> Path:
 
 def capture_url(url: str, inbox: Path, dry_run: bool = False) -> Path:
     info, error = run_yt_dlp(url)
-    if info and guess_platform(url, info) == "YouTube":
+    platform = guess_platform(url, info)
+    if info and platform == "YouTube":
         attach_yt_dlp_subtitle(info)
     if info is None and guess_platform(url) == "YouTube":
         fallback_info, fallback_error = youtube_oembed(url)
@@ -801,12 +1220,29 @@ def capture_url(url: str, inbox: Path, dry_run: bool = False) -> Path:
                 error = f"{error}\n\n{page_error}"
         elif fallback_error:
             error = f"{error}\n\n{fallback_error}" if error else fallback_error
-    elif guess_platform(url, info) == "YouTube":
+    elif platform == "YouTube":
         page_info, page_error = youtube_page_info(url)
         info = merge_info(info, page_info)
         if info:
             attach_yt_dlp_subtitle(info)
         if page_error:
+            error = f"{error}\n\n{page_error}" if error else page_error
+    elif platform in {"抖音", "小红书"} or guess_platform(url) in {"抖音", "小红书"}:
+        platform = platform if platform in {"抖音", "小红书"} else guess_platform(url)
+        if platform == "抖音":
+            page_info, page_error = douyin_page_info(url)
+        else:
+            page_info, page_error = xiaohongshu_page_info(url)
+        if page_info is not None:
+            info = merge_info(info, page_info)
+            note = f"已使用{platform}公开页面备用解析补充基础信息。"
+            if error:
+                info = info or {}
+                info["parse_notice"] = f"yt-dlp 解析失败：{error}\n\n{note}"
+                error = None
+            elif info and first_non_empty(info, ["parse_tool"]) == "公开页面 HTML":
+                error = None
+        elif page_error:
             error = f"{error}\n\n{page_error}" if error else page_error
     filename, note = build_note(url, info, error)
     output_path = unique_path(inbox, filename)
