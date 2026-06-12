@@ -1,3 +1,5 @@
 .DS_Store
 .omx/
-
+__pycache__/
+*.py[cod]
+.obsidian/workspace.json

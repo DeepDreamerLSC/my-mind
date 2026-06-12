@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import json
+import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -44,9 +47,64 @@ XHS_DESKTOP_HEADERS = {
 TRANSCRIPT_SUMMARY_SENTENCE_COUNT = 12
 TRANSCRIPT_KEY_POINT_COUNT = 12
 TRANSCRIPT_TIMELINE_INTERVAL_SECONDS = 300
+XHS_IMAGE_OCR_MAX_IMAGES = 3
+PADDLEOCR_VL_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_PADDLEOCR_VL_TIMEOUT_SECONDS", "90"))
+PADDLE_TEXT_OCR_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_PADDLE_TEXT_OCR_TIMEOUT_SECONDS", "300"))
+APPLE_VISION_OCR_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_APPLE_VISION_OCR_TIMEOUT_SECONDS", "120"))
+APPLE_VISION_OCR_SCRIPT = Path(__file__).with_name("apple_vision_ocr.swift")
+PADDLE_TEXT_OCR_SCRIPT = Path(__file__).with_name("paddle_text_ocr.py")
+PADDLEOCR_VL_OCR_SCRIPT = Path(__file__).with_name("paddleocr_vl_ocr.py")
 _OPENCC_CONVERTER: Any | None = None
 _ZHCONV_MODULE: Any | None = None
 _SIMPLIFY_BACKEND_CHECKED = False
+_MANAGED_CHILDREN: set[subprocess.Popen[str]] = set()
+
+
+def terminate_managed_children() -> None:
+    for child in list(_MANAGED_CHILDREN):
+        if child.poll() is not None:
+            _MANAGED_CHILDREN.discard(child)
+            continue
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except Exception:  # noqa: BLE001
+            with contextlib.suppress(Exception):
+                child.terminate()
+
+
+def handle_shutdown_signal(signum: int, _frame: Any) -> None:
+    terminate_managed_children()
+    raise SystemExit(128 + signum)
+
+
+for _shutdown_signal in (signal.SIGINT, signal.SIGTERM):
+    with contextlib.suppress(Exception):
+        signal.signal(_shutdown_signal, handle_shutdown_signal)
+
+
+def run_managed_command(command: list[str], *, timeout: int, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    child = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    _MANAGED_CHILDREN.add(child)
+    try:
+        try:
+            stdout, stderr = child.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(command, child.returncode, stdout, stderr)
+        except subprocess.TimeoutExpired:
+            with contextlib.suppress(Exception):
+                os.killpg(child.pid, signal.SIGTERM)
+            stdout, stderr = child.communicate(timeout=5)
+            stderr = (stderr or "") + f"\n命令超时：超过 {timeout} 秒，已终止 OCR 子进程。"
+            return subprocess.CompletedProcess(command, -signal.SIGTERM, stdout, stderr)
+    finally:
+        _MANAGED_CHILDREN.discard(child)
 
 TRADITIONAL_PHRASES = {
     "視頻": "视频",
@@ -2500,6 +2558,13 @@ def yaml_scalar(value: Any) -> str:
     return text
 
 
+def yaml_field(label: str, value: Any) -> str:
+    rendered = yaml_scalar(value)
+    if not rendered:
+        return f"{label}:"
+    return f"{label}: {rendered}"
+
+
 def yaml_list(values: list[Any]) -> list[str]:
     cleaned = [str(value).strip() for value in values if value not in (None, "")]
     if not cleaned:
@@ -2623,6 +2688,12 @@ def fetch_html(url: str, headers: dict[str, str] | None = None, timeout: int = 3
     request = urllib.request.Request(url, headers=headers or DEFAULT_HEADERS)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         return response.read().decode("utf-8", "ignore"), response.geturl()
+
+
+def fetch_binary(url: str, headers: dict[str, str] | None = None, timeout: int = 30) -> bytes:
+    request = urllib.request.Request(url, headers=headers or DEFAULT_HEADERS)
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return response.read()
 
 
 def strip_html(value: str) -> str:
@@ -3455,13 +3526,24 @@ def xiaohongshu_note_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def xiaohongshu_image_url(note: dict[str, Any], metadata: dict[str, str]) -> str:
+def xiaohongshu_image_urls(note: dict[str, Any], metadata: dict[str, str]) -> list[str]:
+    urls: list[str] = []
     image_list = note.get("imageList") if isinstance(note.get("imageList"), list) else []
     for image in image_list:
         url = first_url_from_media(image)
-        if url:
-            return url
-    return clean_url(metadata.get("og:image") or "")
+        if url and url not in urls:
+            urls.append(url)
+    if urls:
+        return urls
+    fallback = clean_url(metadata.get("og:image") or "")
+    if fallback and fallback not in urls:
+        urls.append(fallback)
+    return urls
+
+
+def xiaohongshu_image_url(note: dict[str, Any], metadata: dict[str, str]) -> str:
+    urls = xiaohongshu_image_urls(note, metadata)
+    return urls[0] if urls else ""
 
 
 def xiaohongshu_tags(note: dict[str, Any], description: str) -> list[str]:
@@ -3503,7 +3585,8 @@ def xiaohongshu_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
     author = str(user.get("nickname") or "")
     author_id = str(user.get("userId") or "")
     author_url = f"https://www.xiaohongshu.com/user/profile/{author_id}" if author_id else ""
-    thumbnail = xiaohongshu_image_url(note, metadata)
+    image_urls = xiaohongshu_image_urls(note, metadata)
+    thumbnail = image_urls[0] if image_urls else ""
     upload_date = timestamp_upload_date(note.get("time"))
     note_type = str(note.get("type") or "")
     image_count = len(note.get("imageList") or []) if isinstance(note.get("imageList"), list) else ""
@@ -3521,6 +3604,7 @@ def xiaohongshu_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
         "uploader_url": author_url,
         "upload_date": upload_date,
         "thumbnail": thumbnail,
+        "image_urls": image_urls,
         "webpage_url": canonical,
         "original_url": url,
         "extractor_key": "XiaoHongShu HTML",
@@ -3544,6 +3628,252 @@ def xiaohongshu_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
             "封面图": thumbnail,
         },
     }, None
+
+
+def download_ocr_image(url: str, output_path: Path) -> str | None:
+    headers = {
+        **XHS_DESKTOP_HEADERS,
+        "Referer": "https://www.xiaohongshu.com/",
+    }
+    try:
+        data = fetch_binary(url, headers=headers, timeout=45)
+    except Exception as exc:  # noqa: BLE001
+        return f"图片下载失败：{exc!r}"
+    if len(data) < 128:
+        return "图片下载结果为空或过小"
+    output_path.write_bytes(data)
+    return None
+
+
+def run_apple_vision_ocr(image_paths: list[Path]) -> tuple[list[dict[str, Any]], str | None]:
+    swift = shutil.which("swift")
+    if not swift:
+        return [], "未找到 swift，无法调用 Apple Vision OCR"
+    if not APPLE_VISION_OCR_SCRIPT.exists():
+        return [], f"未找到 Apple Vision OCR 脚本：{APPLE_VISION_OCR_SCRIPT}"
+    cache_dir = Path(tempfile.gettempdir()) / "my-mind-swift-module-cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["CLANG_MODULE_CACHE_PATH"] = str(cache_dir)
+    env["SWIFT_MODULE_CACHE_PATH"] = str(cache_dir)
+    command = [
+        swift,
+        "-module-cache-path",
+        str(cache_dir),
+        str(APPLE_VISION_OCR_SCRIPT),
+        *[str(path) for path in image_paths],
+    ]
+    result = run_managed_command(command, timeout=APPLE_VISION_OCR_TIMEOUT_SECONDS, env=env)
+    if result.returncode != 0:
+        reason = result.stderr.strip() or result.stdout.strip() or f"swift 返回码 {result.returncode}"
+        return [], f"Apple Vision OCR 失败：{reason[-1200:]}"
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return [], f"Apple Vision OCR 输出不是 JSON：{exc!r}\n\n{result.stdout[-1200:]}"
+    if not isinstance(data, list):
+        return [], "Apple Vision OCR 输出格式异常"
+    return [item for item in data if isinstance(item, dict)], None
+
+
+def candidate_paddleocr_vl_pythons() -> list[str]:
+    candidates = [
+        str(Path.home() / "Desktop" / "work" / "chiralium" / ".venv-mlx" / "bin" / "python"),
+        "/usr/bin/python3",
+        shutil.which("python3") or "",
+    ]
+    unique: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in unique and Path(candidate).exists():
+            unique.append(candidate)
+    return unique
+
+
+def run_paddle_text_ocr(image_paths: list[Path]) -> tuple[list[dict[str, Any]], str | None]:
+    if not PADDLE_TEXT_OCR_SCRIPT.exists():
+        return [], f"未找到 PaddleOCR 文本 OCR 脚本：{PADDLE_TEXT_OCR_SCRIPT}"
+    errors: list[str] = []
+    for python in candidate_paddleocr_vl_pythons():
+        probe = run_managed_command(
+            [
+                python,
+                "-c",
+                "import paddleocr, paddle, PIL",
+            ],
+            timeout=60,
+        )
+        if probe.returncode != 0:
+            reason = probe.stderr.strip() or probe.stdout.strip() or f"返回码 {probe.returncode}"
+            errors.append(f"{python} 依赖不完整：{reason[-800:]}")
+            continue
+
+        env = dict(os.environ)
+        env.setdefault("PADDLE_PDX_MODEL_SOURCE", "bos")
+        env.setdefault("PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK", "True")
+        command = [python, str(PADDLE_TEXT_OCR_SCRIPT), *[str(path) for path in image_paths]]
+        result = run_managed_command(command, timeout=PADDLE_TEXT_OCR_TIMEOUT_SECONDS, env=env)
+        if result.returncode != 0:
+            reason = result.stderr.strip() or result.stdout.strip() or f"返回码 {result.returncode}"
+            errors.append(f"{python} PaddleOCR 文本 OCR 失败：{reason[-1600:]}")
+            continue
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            errors.append(f"{python} PaddleOCR 文本 OCR 输出不是 JSON：{exc!r}\n\n{result.stdout[-1200:]}")
+            continue
+        if not isinstance(data, list):
+            errors.append(f"{python} PaddleOCR 文本 OCR 输出格式异常")
+            continue
+        return [item for item in data if isinstance(item, dict)], None
+    return [], "没有可用的 PaddleOCR 文本 OCR 环境。\n\n" + "\n\n".join(errors)
+
+
+def run_paddleocr_vl_ocr(image_paths: list[Path]) -> tuple[list[dict[str, Any]], str | None]:
+    if not PADDLEOCR_VL_OCR_SCRIPT.exists():
+        return [], f"未找到 PaddleOCR-VL OCR 脚本：{PADDLEOCR_VL_OCR_SCRIPT}"
+    errors: list[str] = []
+    for python in candidate_paddleocr_vl_pythons():
+        probe = run_managed_command(
+            [
+                python,
+                "-c",
+                "import paddleocr, paddle, PIL, safetensors, sentencepiece",
+            ],
+            timeout=60,
+        )
+        if probe.returncode != 0:
+            reason = probe.stderr.strip() or probe.stdout.strip() or f"返回码 {probe.returncode}"
+            errors.append(f"{python} 依赖不完整：{reason[-800:]}")
+            continue
+
+        command = [python, str(PADDLEOCR_VL_OCR_SCRIPT), *[str(path) for path in image_paths]]
+        result = run_managed_command(command, timeout=PADDLEOCR_VL_TIMEOUT_SECONDS)
+        if result.returncode != 0:
+            reason = result.stderr.strip() or result.stdout.strip() or f"返回码 {result.returncode}"
+            errors.append(f"{python} PaddleOCR-VL OCR 失败：{reason[-1600:]}")
+            continue
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            errors.append(f"{python} PaddleOCR-VL 输出不是 JSON：{exc!r}\n\n{result.stdout[-1200:]}")
+            continue
+        if not isinstance(data, list):
+            errors.append(f"{python} PaddleOCR-VL 输出格式异常")
+            continue
+        return [item for item in data if isinstance(item, dict)], None
+    return [], "没有可用的 PaddleOCR-VL OCR 环境。\n\n" + "\n\n".join(errors)
+
+
+def attach_image_ocr(
+    info: dict[str, Any],
+    *,
+    max_images: int = XHS_IMAGE_OCR_MAX_IMAGES,
+    backend: str = "auto",
+) -> None:
+    if info.get("image_ocr") or info.get("image_ocr_error"):
+        return
+    raw_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+    image_urls: list[str] = []
+    for raw_url in raw_urls:
+        url = clean_url(raw_url)
+        if url and url not in image_urls:
+            image_urls.append(url)
+    if not image_urls:
+        return
+
+    attempted: list[str] = []
+    downloaded: list[tuple[int, str, Path]] = []
+    with tempfile.TemporaryDirectory(prefix="my-mind-xhs-ocr-") as temp_dir_name:
+        temp_dir = Path(temp_dir_name)
+        for index, image_url in enumerate(image_urls[:max_images], start=1):
+            image_path = temp_dir / f"xhs-image-{index:02d}.jpg"
+            error = download_ocr_image(image_url, image_path)
+            if error:
+                attempted.append(f"图片 {index}：{error}")
+                continue
+            downloaded.append((index, image_url, image_path))
+
+        if not downloaded:
+            info["image_ocr_error"] = "没有可用于 OCR 的小红书图片。\n\n" + "\n".join(attempted)
+            return
+
+        image_paths = [item[2] for item in downloaded]
+        selected_backend = "PaddleOCR"
+        model = ""
+        normalized_backend = backend.strip().lower()
+        if normalized_backend in {"auto", "paddleocr"}:
+            records, error = run_paddle_text_ocr(image_paths)
+            model = "PP-OCRv5_server_det+PP-OCRv5_server_rec"
+            if error and normalized_backend == "auto":
+                paddle_text_error = error
+                records, error = run_apple_vision_ocr(image_paths)
+                selected_backend = "Apple Vision"
+                model = ""
+                if error:
+                    info["image_ocr_error"] = (
+                        "PaddleOCR 文本 OCR 失败：\n"
+                        + paddle_text_error
+                        + "\n\nApple Vision OCR 失败：\n"
+                        + error
+                    )
+                    if attempted:
+                        info["image_ocr_error"] += "\n\n图片下载问题：\n" + "\n".join(attempted)
+                    return
+        elif normalized_backend == "apple-vision":
+            records, error = run_apple_vision_ocr(image_paths)
+            selected_backend = "Apple Vision"
+            model = ""
+        elif normalized_backend == "paddleocr-vl":
+            records, error = run_paddleocr_vl_ocr(image_paths)
+            selected_backend = "PaddleOCR-VL"
+            model = "PaddleOCR-VL-1.6"
+        else:
+            info["image_ocr_error"] = f"未知 OCR 后端：{backend}"
+            return
+
+        if error:
+            info["image_ocr_error"] = f"{selected_backend} OCR 失败：\n" + error
+            if attempted:
+                info["image_ocr_error"] += "\n\n图片下载问题：\n" + "\n".join(attempted)
+            return
+
+    record_by_path = {str(record.get("path") or ""): record for record in records}
+    first_record = records[0] if records else {}
+    items: list[dict[str, Any]] = []
+    ocr_errors: list[str] = attempted[:]
+    for index, image_url, image_path in downloaded:
+        record = record_by_path.get(str(image_path), {})
+        if record.get("error"):
+            ocr_errors.append(f"图片 {index}：{record.get('error')}")
+        lines = record.get("lines") if isinstance(record.get("lines"), list) else []
+        text = "\n".join(str(line) for line in lines if str(line).strip())
+        if not text:
+            text = str(record.get("text") or "")
+        text = normalize_cjk_text(text)
+        if text:
+            items.append(
+                {
+                    "index": index,
+                    "source_url": image_url,
+                    "text": text,
+                    "line_count": len(lines),
+                }
+            )
+
+    combined_text = "\n".join(str(item.get("text") or "") for item in items)
+    info["image_ocr"] = {
+        "source": "小红书公开图片 OCR",
+        "backend": str(first_record.get("backend") or selected_backend),
+        "model": str(first_record.get("model") or model),
+        "pipeline_version": str(first_record.get("pipeline_version") or ""),
+        "compatibility": str(first_record.get("compatibility") or ""),
+        "image_count": len(image_urls),
+        "processed_count": len(downloaded),
+        "text_image_count": len(items),
+        "word_count": transcript_word_count(combined_text),
+        "items": items,
+        "errors": ocr_errors,
+    }
 
 
 def media_duration_seconds(info: dict[str, Any]) -> int:
@@ -3909,6 +4239,7 @@ def fmt_upload_date(value: Any) -> str:
 
 
 def excerpt(text: str, limit: int = 1000, notice: str = "（简介过长，第一版仅保留前 1000 字摘录。）") -> str:
+    text = text.replace("\t", "")
     text = re.sub(r"\n{3,}", "\n\n", text.strip())
     if len(text) <= limit:
         return text
@@ -3963,6 +4294,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     external_transcript_error = first_non_empty(info, ["external_transcript_error"])
     content_extract = info.get("content_extract") if isinstance(info.get("content_extract"), dict) else None
     content_extract_error = first_non_empty(info, ["content_extract_error"])
+    image_ocr = info.get("image_ocr") if isinstance(info.get("image_ocr"), dict) else None
+    image_ocr_error = first_non_empty(info, ["image_ocr_error"])
     parse_notice = first_non_empty(info, ["parse_notice"])
     parse_status = "已解析" if info and not error else "解析失败"
     if info and error:
@@ -3975,33 +4308,37 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
     filename = sanitize_filename_part(f"{now_date()} {platform} - {title}") + ".md"
     body = [
         "---",
-        "类别: 收件箱",
-        f"资料类型: {yaml_scalar(material_type)}",
-        f"来源平台: {yaml_scalar(platform)}",
-        f"标题: {yaml_scalar(title)}",
-        f"作者或频道: {yaml_scalar(author)}",
-        f"作者编号: {yaml_scalar(author_id)}",
-        f"发布时间: {yaml_scalar(publish_date)}",
-        f"捕获时间: {yaml_scalar(now_datetime())}",
-        f"来源链接: {yaml_scalar(webpage_url)}",
-        f"原始链接: {yaml_scalar(url)}",
-        f"内容编号: {yaml_scalar(content_id)}",
-        f"时长: {yaml_scalar(duration)}",
-        f"封面图: {yaml_scalar(thumbnail)}",
-        f"点赞数: {yaml_scalar(like_count)}",
-        f"评论数: {yaml_scalar(comment_count)}",
-        f"收藏数: {yaml_scalar(collect_count)}",
-        f"分享数: {yaml_scalar(share_count)}",
-        f"解析工具: {yaml_scalar(parse_tool)}",
-        f"解析器: {yaml_scalar(extractor)}",
-        f"解析状态: {yaml_scalar(parse_status)}",
-        f"外部转录链接: {yaml_scalar(external_transcript_url or (external_transcript or {}).get('url', ''))}",
-        f"外部转录来源: {yaml_scalar((external_transcript or {}).get('source', ''))}",
-        f"字幕来源: {yaml_scalar((youtube_subtitle or {}).get('source', ''))}",
-        f"字幕语言: {yaml_scalar((youtube_subtitle or {}).get('language', ''))}",
-        f"内容摘录来源: {yaml_scalar((content_extract or {}).get('source', ''))}",
-        f"内容摘录后端: {yaml_scalar((content_extract or {}).get('backend', ''))}",
-        f"内容摘录字数: {yaml_scalar((content_extract or {}).get('word_count', ''))}",
+        yaml_field("类别", "收件箱"),
+        yaml_field("资料类型", material_type),
+        yaml_field("来源平台", platform),
+        yaml_field("标题", title),
+        yaml_field("作者或频道", author),
+        yaml_field("作者编号", author_id),
+        yaml_field("发布时间", publish_date),
+        yaml_field("捕获时间", now_datetime()),
+        yaml_field("来源链接", webpage_url),
+        yaml_field("原始链接", url),
+        yaml_field("内容编号", content_id),
+        yaml_field("时长", duration),
+        yaml_field("封面图", thumbnail),
+        yaml_field("点赞数", like_count),
+        yaml_field("评论数", comment_count),
+        yaml_field("收藏数", collect_count),
+        yaml_field("分享数", share_count),
+        yaml_field("解析工具", parse_tool),
+        yaml_field("解析器", extractor),
+        yaml_field("解析状态", parse_status),
+        yaml_field("外部转录链接", external_transcript_url or (external_transcript or {}).get("url", "")),
+        yaml_field("外部转录来源", (external_transcript or {}).get("source", "")),
+        yaml_field("字幕来源", (youtube_subtitle or {}).get("source", "")),
+        yaml_field("字幕语言", (youtube_subtitle or {}).get("language", "")),
+        yaml_field("内容摘录来源", (content_extract or {}).get("source", "")),
+        yaml_field("内容摘录后端", (content_extract or {}).get("backend", "")),
+        yaml_field("内容摘录字数", (content_extract or {}).get("word_count", "")),
+        yaml_field("图片OCR来源", (image_ocr or {}).get("source", "")),
+        yaml_field("图片OCR后端", (image_ocr or {}).get("backend", "")),
+        yaml_field("图片OCR模型", (image_ocr or {}).get("model", "")),
+        yaml_field("图片OCR字数", (image_ocr or {}).get("word_count", "")),
         "处理状态: 待分拣",
         "关联项目: []",
         "关联领域: []",
@@ -4059,6 +4396,46 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
 
     excerpt_heading = "文案摘录" if platform in {"抖音", "小红书", "X", "TikTok"} else "简介摘录"
     body.extend(["", f"## {excerpt_heading}", "", description or "暂无。"])
+
+    if image_ocr:
+        items = image_ocr.get("items") if isinstance(image_ocr.get("items"), list) else []
+        errors = image_ocr.get("errors") if isinstance(image_ocr.get("errors"), list) else []
+        body.extend(
+            [
+                "",
+                "## 图片文字 OCR",
+                "",
+                f"- 来源：{image_ocr.get('source', '')}",
+                f"- 后端：{image_ocr.get('backend', '')}",
+                f"- 模型：{image_ocr.get('model', '')}",
+                f"- 兼容模式：{image_ocr.get('compatibility', '') or '无'}",
+                f"- 图片总数：{image_ocr.get('image_count', 0)}",
+                f"- 已处理图片数：{image_ocr.get('processed_count', 0)}",
+                f"- 识别到文字图片数：{image_ocr.get('text_image_count', 0)}",
+                f"- 估算字数：{image_ocr.get('word_count', 0)}",
+                "",
+                "说明：这里保存的是小红书公开图片的本机 OCR 结果，用于后续整理；OCR 可能存在错字，沉淀前需要校对关键术语和事实。",
+            ]
+        )
+        if items:
+            for item in items:
+                body.extend(
+                    [
+                        "",
+                        f"### 图片 {item.get('index', '')}",
+                        "",
+                        f"- 来源图片：{item.get('source_url', '')}",
+                        "",
+                        str(item.get("text") or "").strip() or "未识别到文字。",
+                    ]
+                )
+        else:
+            body.extend(["", "未识别到可用图片文字。"])
+        if errors:
+            body.extend(["", "### OCR 问题", ""])
+            body.extend(f"- {error_item}" for error_item in errors)
+    elif image_ocr_error:
+        body.extend(["", "## 图片文字 OCR 失败", "", image_ocr_error])
 
     if content_extract:
         body.extend(
@@ -4175,6 +4552,12 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
             "",
             "待补充。",
             "",
+            "## 阅读思考",
+            "",
+            "- 待阅读后补充。",
+            "- 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。",
+            "- 如果和 Codex 交流过，可把交流后的新判断补在这里。",
+            "",
             "## 后续处理建议",
             "",
             "- 判断是否需要进入资料库。",
@@ -4209,6 +4592,9 @@ def capture_url(
     *,
     dry_run: bool = False,
     extract_content: bool = False,
+    image_ocr: bool = True,
+    image_ocr_backend: str = "auto",
+    max_ocr_images: int = XHS_IMAGE_OCR_MAX_IMAGES,
     transcribe_backend: str = "auto",
     transcribe_model: str = "small",
     transcribe_language: str = "zh",
@@ -4257,6 +4643,8 @@ def capture_url(
                 error = None
         elif page_error:
             error = f"{error}\n\n{page_error}" if error else page_error
+    if image_ocr and info and not dry_run and guess_platform(url, info) == "小红书":
+        attach_image_ocr(info, max_images=max_ocr_images, backend=image_ocr_backend)
     if extract_content and info and not dry_run:
         attach_content_extract(
             info,
@@ -4283,6 +4671,28 @@ def parse_args() -> argparse.Namespace:
         "--extract-content",
         action="store_true",
         help="Extract public media audio and generate a short content excerpt when a transcription backend is available",
+    )
+    parser.add_argument(
+        "--image-ocr",
+        action="store_true",
+        help="Run local OCR for public Xiaohongshu image notes. Enabled by default; kept for explicit calls.",
+    )
+    parser.add_argument(
+        "--no-image-ocr",
+        action="store_true",
+        help="Skip local OCR for public Xiaohongshu image notes.",
+    )
+    parser.add_argument(
+        "--image-ocr-backend",
+        default="auto",
+        choices=["auto", "paddleocr", "apple-vision", "paddleocr-vl"],
+        help="OCR backend for Xiaohongshu images. auto uses PaddleOCR text OCR first and Apple Vision as fallback.",
+    )
+    parser.add_argument(
+        "--max-ocr-images",
+        type=int,
+        default=XHS_IMAGE_OCR_MAX_IMAGES,
+        help="Maximum number of Xiaohongshu images to OCR during capture",
     )
     parser.add_argument(
         "--transcribe-backend",
@@ -4320,6 +4730,9 @@ def main() -> int:
                 inbox,
                 dry_run=args.dry_run,
                 extract_content=args.extract_content,
+                image_ocr=not args.no_image_ocr,
+                image_ocr_backend=args.image_ocr_backend,
+                max_ocr_images=args.max_ocr_images,
                 transcribe_backend=args.transcribe_backend,
                 transcribe_model=args.transcribe_model,
                 transcribe_language=args.transcribe_language,
