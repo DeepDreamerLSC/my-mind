@@ -1,0 +1,6 @@
+interface:
+  display_name: "前台反馈入队"
+  short_description: "把 OpenClaw 回复追加到反馈队列"
+  default_prompt: "Use $frontdesk-feedback to append an OpenClaw reply into my-mind's frontdesk feedback queue."
+policy:
+  allow_implicit_invocation: true
