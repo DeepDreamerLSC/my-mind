@@ -12,6 +12,8 @@
 解析工具: yt-dlp
 解析器: YouTube oEmbed
 解析状态: 已解析
+内容质量: 需核验
+质量门禁: 已有外部转录来源，但收件箱未生成标准化正文级摘录字段；推送前建议先整理摘要。
 外部转录链接: "https://lexfridman.com/jensen-huang-transcript"
 外部转录来源: Lex Fridman 官方 transcript
 字幕来源: 

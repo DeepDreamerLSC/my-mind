@@ -19,10 +19,19 @@
 解析工具: 公开页面 HTML
 解析器: XiaoHongShu HTML
 解析状态: 已解析
+内容质量: 可推送
+质量门禁: 已具备文案摘录和图片 OCR，可进入分拣和前台阅读候选。
 外部转录链接: 
 外部转录来源: 
 字幕来源: 
 字幕语言: 
+内容摘录来源:
+内容摘录后端:
+内容摘录字数:
+图片OCR来源: 小红书公开图片 OCR
+图片OCR后端: PaddleOCR
+图片OCR模型: PP-OCRv5_server_det+PP-OCRv5_server_rec
+图片OCR字数: 357
 处理状态: 已分拣
 关联项目:
   - 个人数据资产系统
@@ -110,6 +119,47 @@ Human 最后 review
 * 不提交、不推送、不做破坏性操作。
 * 所有结论必须基于真实文件、日志、请求链或官方来源。
 * 控制并发和递归，避免 token 和时间失控。#vibecoding大赏[话题]# #codex[话题]#
+
+## 图片文字 OCR
+
+- 来源：小红书公开图片 OCR
+- 后端：PaddleOCR
+- 模型：PP-OCRv5_server_det+PP-OCRv5_server_rec
+- 图片总数：1
+- 已处理图片数：1
+- 识别到文字图片数：1
+- 估算字数：357
+
+说明：已补跑公开图片 OCR，用于核对正文与图片里的流程细节；关键术语和个别错字仍建议在沉淀前复核。
+
+### 图片 1
+
+- 来源图片：http://sns-webpic-qc.xhscdn.com/202606121949/e4b8b278faebd7d4e9dbe60ccf32513c/notes_pre_post/1040g3k032109k4j87u005pdcv9m3gf3o00eki1o!nd_prv_wlteh_jpg_3
+
+Codex Agent工作流优化器
+一份用于优化Codex工作流的本地Sk它会安装一套可复用的CoexSubagents默认配置，并把复杂开发拆成两种
+更可控的模式：
+eaiurefeaturecoderfeature_reviewer对抗环，最后humanreview
+大Feature：方案确认→squad实现→验收，人主要介入阶段1和阶段3
+核心目标：减少上线后问题，Codex不只是会写代码，而是按工程流程先查证，再判断、再实现、最后验收。
+解决什么问题
+日常使用Codex时，复杂任务很容易出现这些问题
+没看清真实代码链路就开始改
+小需求缺少revlewer对抗，隐藏bug容易进注线
+·大需求一开始就写代码；方案、边异、验收标准都没确认
+没看日志、payload，allbackpath就判断根因。
+PR或上线前缺少独立风险审查
+第三方ARI/SDK行为靠记忆断。
+Ubug没有复现步，console，network，载图证据
+验收阶段只有代码能跑”，没有逐项证据和Go/No-Go
+这份Skl的目标是把这些高频动作国化成可复用的agens和工作流。
+默认安装的Agents
+工作流Agents
+solution planner
+大Feature方案确认Agent
+只做需求边界，现有链路，推荐方案，验收标准。测试计划和风险清单，不写业务代码
+squad_lead
+大Feature实现阶段的squad控制Agent
 
 ## 标签和分类
 
