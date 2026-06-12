@@ -47,6 +47,7 @@ XHS_DESKTOP_HEADERS = {
 TRANSCRIPT_SUMMARY_SENTENCE_COUNT = 12
 TRANSCRIPT_KEY_POINT_COUNT = 12
 TRANSCRIPT_TIMELINE_INTERVAL_SECONDS = 300
+DEFAULT_MAX_TRANSCRIBE_SECONDS = 360
 XHS_IMAGE_OCR_MAX_IMAGES = 3
 PADDLEOCR_VL_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_PADDLEOCR_VL_TIMEOUT_SECONDS", "90"))
 PADDLE_TEXT_OCR_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_PADDLE_TEXT_OCR_TIMEOUT_SECONDS", "300"))
@@ -4153,7 +4154,7 @@ def attach_content_extract(
 ) -> None:
     if info.get("content_extract") or info.get("content_extract_error"):
         return
-    media_url = first_non_empty(info, ["media_url"])
+    media_url = media_url_from_info(info)
     if not media_url:
         info["content_extract_error"] = "当前链接未暴露可转写的公开视频地址"
         return
@@ -4253,6 +4254,52 @@ def first_non_empty(info: dict[str, Any], keys: list[str]) -> str:
         if value not in (None, ""):
             return str(value)
     return ""
+
+
+def media_url_from_info(info: dict[str, Any]) -> str:
+    direct = first_non_empty(info, ["media_url"])
+    if direct:
+        return direct
+
+    candidates: list[tuple[float, str]] = []
+
+    def add_format(fmt: Any) -> None:
+        if not isinstance(fmt, dict):
+            return
+        url = clean_url(fmt.get("url") or "")
+        if not url:
+            return
+        acodec = str(fmt.get("acodec") or "").lower()
+        vcodec = str(fmt.get("vcodec") or "").lower()
+        if acodec in {"", "none"} and vcodec not in {"", "none"}:
+            return
+        try:
+            bitrate = float(fmt.get("abr") or fmt.get("tbr") or 0)
+        except (TypeError, ValueError):
+            bitrate = 0
+        audio_only_bonus = 1000 if vcodec in {"", "none"} else 100
+        candidates.append((audio_only_bonus + bitrate, url))
+
+    for key in ("requested_downloads", "requested_formats", "formats"):
+        values = info.get(key)
+        if isinstance(values, list):
+            for value in values:
+                add_format(value)
+        else:
+            add_format(values)
+
+    add_format(info)
+    if not candidates:
+        return ""
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def should_extract_content(info: dict[str, Any] | None, mode: str) -> bool:
+    if not info or mode == "never":
+        return False
+    if mode == "always":
+        return True
+    return bool(media_url_from_info(info))
 
 
 def subtitle_languages(info: dict[str, Any], key: str) -> list[str]:
@@ -4450,7 +4497,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
                 f"- 转写片段数：{content_extract.get('segment_count', 0)}",
                 f"- 估算字数：{content_extract.get('word_count', 0)}",
                 "",
-                "说明：这里保存的是基于转写结果生成的摘要、关键点、完整时间线摘录和完整转写摘录；普通入箱不会生成这一部分。",
+                "说明：这里保存的是基于转写结果生成的摘要、关键点、完整时间线摘录和完整转写摘录；公开短视频入箱默认会尝试生成这一部分。",
             ]
         )
         if content_extract.get("quality_note"):
@@ -4591,7 +4638,7 @@ def capture_url(
     inbox: Path,
     *,
     dry_run: bool = False,
-    extract_content: bool = False,
+    extract_content_mode: str = "auto",
     image_ocr: bool = True,
     image_ocr_backend: str = "auto",
     max_ocr_images: int = XHS_IMAGE_OCR_MAX_IMAGES,
@@ -4599,7 +4646,7 @@ def capture_url(
     transcribe_model: str = "small",
     transcribe_language: str = "zh",
     transcribe_command: str = "",
-    max_transcribe_seconds: int = 7200,
+    max_transcribe_seconds: int = DEFAULT_MAX_TRANSCRIBE_SECONDS,
 ) -> Path:
     info, error = run_yt_dlp(url)
     platform = guess_platform(url, info)
@@ -4645,7 +4692,7 @@ def capture_url(
             error = f"{error}\n\n{page_error}" if error else page_error
     if image_ocr and info and not dry_run and guess_platform(url, info) == "小红书":
         attach_image_ocr(info, max_images=max_ocr_images, backend=image_ocr_backend)
-    if extract_content and info and not dry_run:
+    if should_extract_content(info, extract_content_mode) and info and not dry_run:
         attach_content_extract(
             info,
             backend=transcribe_backend,
@@ -4667,10 +4714,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("urls", nargs="+", help="Links to capture")
     parser.add_argument("--inbox", default=str(DEFAULT_INBOX), help="Inbox directory")
     parser.add_argument("--dry-run", action="store_true", help="Print target paths without writing files")
-    parser.add_argument(
+    content_group = parser.add_mutually_exclusive_group()
+    content_group.add_argument(
         "--extract-content",
         action="store_true",
-        help="Extract public media audio and generate a short content excerpt when a transcription backend is available",
+        help="Force public media audio extraction and transcription even when auto mode cannot identify a media URL first.",
+    )
+    content_group.add_argument(
+        "--no-extract-content",
+        action="store_true",
+        help="Skip default video transcription and only capture basic metadata/copy.",
     )
     parser.add_argument(
         "--image-ocr",
@@ -4698,7 +4751,7 @@ def parse_args() -> argparse.Namespace:
         "--transcribe-backend",
         default="auto",
         choices=["auto", "whisper-cli", "faster-whisper", "custom"],
-        help="Transcription backend used by --extract-content",
+        help="Transcription backend used for default video transcription or --extract-content",
     )
     parser.add_argument("--transcribe-model", default="small", help="Whisper/faster-whisper model name")
     parser.add_argument("--transcribe-language", default="zh", help="Transcription language, or auto")
@@ -4710,7 +4763,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-transcribe-seconds",
         type=int,
-        default=7200,
+        default=DEFAULT_MAX_TRANSCRIBE_SECONDS,
         help="Skip transcription when known media duration exceeds this many seconds",
     )
     return parser.parse_args()
@@ -4723,13 +4776,14 @@ def main() -> int:
         inbox = ROOT / inbox
 
     created: list[Path] = []
+    extract_content_mode = "never" if args.no_extract_content else "always" if args.extract_content else "auto"
     for url in args.urls:
         created.append(
             capture_url(
                 url,
                 inbox,
                 dry_run=args.dry_run,
-                extract_content=args.extract_content,
+                extract_content_mode=extract_content_mode,
                 image_ocr=not args.no_image_ocr,
                 image_ocr_backend=args.image_ocr_backend,
                 max_ocr_images=args.max_ocr_images,

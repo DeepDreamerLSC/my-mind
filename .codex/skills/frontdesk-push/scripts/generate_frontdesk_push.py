@@ -14,8 +14,10 @@ from zoneinfo import ZoneInfo
 ROOT = Path(__file__).resolve().parents[4]
 TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_INBOX = ROOT / "00_收件箱"
+DEFAULT_FLOW_DIR = ROOT / "05_流转区"
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 DEFAULT_PROJECT_DIR = ROOT / "10_项目" / "个人数据资产系统"
+FLOW_PRIORITY_FALLBACK = 999_999
 
 
 HIGH_KEYWORDS = [
@@ -52,6 +54,7 @@ class InboxNote:
     reading_questions: list[str]
     distill_direction: str
     score: int
+    flow_rank: int
     value: str
     action: str
 
@@ -103,7 +106,11 @@ def clean_line(text: str, limit: int = 140) -> str:
     text = re.sub(r"\s+", " ", text).strip(" -\n\t")
     if len(text) <= limit:
         return text
-    return text[:limit].rstrip() + "..."
+    clipped = text[:limit].rstrip()
+    sentence_end = max(clipped.rfind("。"), clipped.rfind("！"), clipped.rfind("？"))
+    if sentence_end >= int(limit * 0.55):
+        return clipped[: sentence_end + 1].rstrip()
+    return clipped + "..."
 
 
 def first_url(text: str) -> str:
@@ -118,6 +125,24 @@ def note_url(meta: dict[str, str], body: str, field: str, fallback_section: str 
     if fallback_section:
         return first_url(first_section(body, fallback_section))
     return ""
+
+
+def parse_flow_priority(flow_dir: Path) -> dict[str, int]:
+    queue_path = flow_dir / "10_待读" / "收件箱待读队列.md"
+    if not queue_path.exists():
+        return {}
+    priority: dict[str, int] = {}
+    index = 0
+    for line in read_text(queue_path).splitlines():
+        match = re.search(r"^- 来源文件：\[([^\]]+)\]\(", line)
+        if not match:
+            continue
+        source_path = match.group(1).strip()
+        if not source_path:
+            continue
+        index += 1
+        priority.setdefault(source_path, index)
+    return priority
 
 
 def clip_text(text: str, limit: int) -> str:
@@ -198,7 +223,9 @@ def reading_excerpt(body: str, limit: int) -> str:
             add_excerpt_block(blocks, "视频内容摘录", video)
 
     add_excerpt_block(blocks, "初步内容解析", first_section(body, "初步内容解析"))
+    add_excerpt_block(blocks, "中文摘要", first_section(body, "中文摘要"))
     add_excerpt_block(blocks, "文案摘录", first_section(body, "文案摘录"))
+    add_excerpt_block(blocks, "原文摘录", first_section(body, "原文摘录"))
     add_excerpt_block(blocks, "图片文字 OCR", first_section(body, "图片文字 OCR"))
     add_excerpt_block(blocks, "可提炼主题", first_section(body, "可提炼主题"))
     add_excerpt_block(blocks, "简介摘录", first_section(body, "简介摘录"))
@@ -224,6 +251,23 @@ def reading_excerpt(body: str, limit: int) -> str:
         if remaining <= 160:
             break
     return "\n\n".join(parts).strip()
+
+
+def short_summary(body: str, fallback_excerpt: str, limit: int = 180) -> str:
+    video = first_section(body, "视频内容摘录")
+    candidates = [
+        first_subsection(video, "摘要") if video else "",
+        first_section(body, "中文摘要"),
+        first_section(body, "初步内容解析"),
+        first_section(body, "文案摘录"),
+        first_section(body, "简介摘录"),
+        fallback_excerpt,
+    ]
+    for candidate in candidates:
+        cleaned = clean_reading_text(re.sub(r"\*\*[^*]+\*\*", "", candidate))
+        if cleaned:
+            return clean_line(cleaned, limit)
+    return ""
 
 
 def note_score(meta: dict[str, str], body: str) -> int:
@@ -274,12 +318,14 @@ def note_action(meta: dict[str, str], body: str) -> str:
 def distill_direction(meta: dict[str, str], body: str) -> str:
     text = f"{meta.get('标题', '')}\n{body[:3000]}".lower()
     if any(keyword in text for keyword in ["codex", "openai", "skill", "prompt", "提示词", "agent", "工作流"]):
-        return "`75_提示词库/` 或 `10_项目/个人数据资产系统/`，优先判断是否能沉淀成可复用工作流。"
+        return "`75_提示词库/Codex工作流/` 或 `10_项目/个人数据资产系统/`，优先判断是否能沉淀成可复用工作流。"
+    if any(keyword in text for keyword in ["视觉", "高级感", "排版", "配色"]) or re.search(r"\b(html|ppt)\b", text):
+        return "`75_提示词库/前端与视觉/` 或 `20_资料库/设计与视觉/`，优先判断哪些约束能稳定复用。"
     if any(keyword in text for keyword in ["管理", "团队", "组织"]):
-        return "`20_资料库/管理/` 或 `30_原子笔记/`，优先提炼管理原则和可执行做法。"
+        return "`20_资料库/管理与组织/` 或 `30_原子笔记/`，优先提炼管理原则和可执行做法。"
     if any(keyword in text for keyword in ["ai", "人工智能", "nvidia", "模型", "算力"]):
-        return "`20_资料库/人工智能/` 或 `60_行业情报/`，优先保留趋势判断和事实线索。"
-    return "`20_资料库/`，先作为资料候选保留，读后再决定是否拆成原子笔记。"
+        return "`20_资料库/人工智能产业/` 或 `60_行业情报/模型与公司/`，优先保留趋势判断和事实线索。"
+    return "`20_资料库/AI产品与工具/` 或 `20_资料库/工作流与自动化/`，先作为资料候选保留，读后再决定是否拆成原子笔记。"
 
 
 def quality_note(meta: dict[str, str], body: str) -> str:
@@ -294,7 +340,16 @@ def quality_note(meta: dict[str, str], body: str) -> str:
         notes.append("本条已有可追溯转录来源，适合后续做更完整资料沉淀。")
     has_readable_section = any(
         first_section(body, heading)
-        for heading in ["文案摘录", "视频内容摘录", "图片文字 OCR", "初步内容解析", "可提炼主题", "简介摘录"]
+        for heading in [
+            "中文摘要",
+            "文案摘录",
+            "原文摘录",
+            "视频内容摘录",
+            "图片文字 OCR",
+            "初步内容解析",
+            "可提炼主题",
+            "简介摘录",
+        ]
     )
     if not meta.get("内容摘录字数") and not meta.get("图片OCR字数") and not has_readable_section:
         notes.append("当前缺少正文级摘录，若要沉淀应先继续解析。")
@@ -328,7 +383,8 @@ def reading_questions(meta: dict[str, str], body: str) -> list[str]:
     ]
 
 
-def load_inbox_notes(inbox: Path, excerpt_chars: int) -> list[InboxNote]:
+def load_inbox_notes(inbox: Path, excerpt_chars: int, flow_priority: dict[str, int] | None = None) -> list[InboxNote]:
+    flow_priority = flow_priority or {}
     notes: list[InboxNote] = []
     for path in sorted(inbox.glob("*.md")):
         if path.name == "目录说明.md":
@@ -338,6 +394,7 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int) -> list[InboxNote]:
         status = meta.get("处理状态", "")
         if status in TERMINAL_STATUSES:
             continue
+        rel_path = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
         title = meta.get("标题") or path.stem
         platform = meta.get("来源平台") or "未知"
         author = meta.get("作者或频道") or "未知"
@@ -345,7 +402,7 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int) -> list[InboxNote]:
         original_url = note_url(meta, body, "原始链接")
         transcript_url = note_url(meta, body, "外部转录链接", "官方转录来源")
         excerpt = reading_excerpt(body, excerpt_chars)
-        short_summary = clean_line(re.sub(r"\*\*[^*]+\*\*", "", excerpt), 220)
+        summary = short_summary(body, excerpt)
         score = note_score(meta, body)
         notes.append(
             InboxNote(
@@ -358,17 +415,18 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int) -> list[InboxNote]:
                 transcript_url=transcript_url,
                 process_status=status or "未知",
                 parse_status=meta.get("解析状态") or "未知",
-                summary=short_summary,
+                summary=summary,
                 reading_excerpt=excerpt,
                 quality_note=quality_note(meta, body),
                 reading_questions=reading_questions(meta, body),
                 distill_direction=distill_direction(meta, body),
                 score=score,
+                flow_rank=flow_priority.get(rel_path, FLOW_PRIORITY_FALLBACK),
                 value=note_value(meta, body),
                 action=note_action(meta, body),
             )
         )
-    notes.sort(key=lambda note: (note.score, note.path.stat().st_mtime), reverse=True)
+    notes.sort(key=lambda note: (note.flow_rank, -note.score, -note.path.stat().st_mtime))
     return notes
 
 
@@ -504,10 +562,12 @@ def unique_path(directory: Path, filename: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a my-mind frontdesk push note for OpenClaw.")
     parser.add_argument("--inbox", default=str(DEFAULT_INBOX), help="Inbox directory.")
+    parser.add_argument("--flow-dir", default=str(DEFAULT_FLOW_DIR), help="Flow-zone directory used to prioritize pending reading items.")
     parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR), help="Directory for frontdesk push notes.")
     parser.add_argument("--project-dir", default=str(DEFAULT_PROJECT_DIR), help="Project directory for progress summary.")
     parser.add_argument("--limit", type=int, default=3, help="Maximum pushed inbox items.")
     parser.add_argument("--excerpt-chars", type=int, default=1200, help="Maximum reading excerpt characters per item.")
+    parser.add_argument("--ignore-flow", action="store_true", help="Ignore 05_流转区 priority and rank directly from inbox notes.")
     parser.add_argument("--dry-run", action="store_true", help="Print push note instead of writing it.")
     return parser.parse_args()
 
@@ -515,16 +575,20 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     inbox = Path(args.inbox)
+    flow_dir = Path(args.flow_dir)
     run_dir = Path(args.run_dir)
     project_dir = Path(args.project_dir)
     if not inbox.is_absolute():
         inbox = ROOT / inbox
+    if not flow_dir.is_absolute():
+        flow_dir = ROOT / flow_dir
     if not run_dir.is_absolute():
         run_dir = ROOT / run_dir
     if not project_dir.is_absolute():
         project_dir = ROOT / project_dir
 
-    note = build_push(load_inbox_notes(inbox, max(args.excerpt_chars, 200)), project_dir, max(args.limit, 1))
+    flow_priority = {} if args.ignore_flow else parse_flow_priority(flow_dir)
+    note = build_push(load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority), project_dir, max(args.limit, 1))
     if args.dry_run:
         print(note, end="")
         return 0

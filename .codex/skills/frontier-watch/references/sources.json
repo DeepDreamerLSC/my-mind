@@ -1,0 +1,302 @@
+[
+  {
+    "name": "OpenAI News",
+    "url": "https://openai.com/news/rss.xml",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 5
+  },
+  {
+    "name": "YouTube / OpenAI",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCXZCJLdBC09xxGZ6gcdrc6A",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "Google DeepMind Blog",
+    "url": "https://deepmind.google/blog/rss.xml",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / Google DeepMind",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCP7jMXSY2xbc3KCAE0MHQ-A",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "Google AI Blog",
+    "url": "https://blog.google/technology/ai/rss/",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / Anthropic",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCrDwWp7EBBv4NwvScIpBDOA",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "Hugging Face Blog",
+    "url": "https://huggingface.co/blog/feed.xml",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / Hugging Face",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCHlNU7kIZhRgSbhHvFoy72w",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "Latent Space",
+    "url": "https://www.latent.space/feed",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / Latent Space",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCxBcwypKK-W3GHd_RZ9FZrQ",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / AI Explained",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCNJ1Ymd5yFuUPtn21xtRbbw",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Dwarkesh Patel",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCXl4i9dYBrFOabk0xGmbkRA",
+    "category_hints": ["AI与Agent工具", "商业", "管理"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Andrej Karpathy",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCXUPKJO5MZQN11PqgIvyuvQ",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / DeepLearning.AI",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcIXc5mJsHVYTZR1maL5l9w",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / The Cognitive Revolution",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCjNRVMBVI30Sak_p6HRWhIA",
+    "category_hints": ["AI与Agent工具", "商业"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Two Minute Papers",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCbfYPyITQ-7l4upoX8nvctg",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "Import AI",
+    "url": "https://jack-clark.net/feed/",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 4
+  },
+  {
+    "name": "Interconnects",
+    "url": "https://www.interconnects.ai/feed",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 4
+  },
+  {
+    "name": "Chip Huyen",
+    "url": "https://huyenchip.com/feed.xml",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "Sebastian Raschka",
+    "url": "https://magazine.sebastianraschka.com/feed",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 4
+  },
+  {
+    "name": "GitHub AI and ML",
+    "url": "https://github.blog/ai-and-ml/feed/",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "Simon Willison",
+    "url": "https://simonwillison.net/atom/everything/",
+    "category_hints": ["AI与Agent工具", "工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "Obsidian Blog",
+    "url": "https://obsidian.md/feed.xml",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / Tiago Forte",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCmvYCRYPDlzSHVNCI_ViJDQ",
+    "category_hints": ["工作流与知识系统", "管理"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Linking Your Thinking",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC85D7ERwhke7wVqskV_DZUA",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Thomas Frank Explains",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCd_WBvzBg1UbHE8j8MIL5Ng",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Nicole van der Hoeven",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCrmQZ9HHnJ2qpd6udc8iYYw",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "Readwise Blog",
+    "url": "https://blog.readwise.io/rss/",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "Logseq Blog",
+    "url": "https://blog.logseq.com/rss/",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "阮一峰网络日志",
+    "url": "https://www.ruanyifeng.com/blog/atom.xml",
+    "category_hints": ["工作流与知识系统", "商业"],
+    "quality": 3
+  },
+  {
+    "name": "少数派",
+    "url": "https://sspai.com/feed",
+    "category_hints": ["工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "Lenny's Newsletter",
+    "url": "https://www.lennysnewsletter.com/feed",
+    "category_hints": ["商业", "管理"],
+    "quality": 4
+  },
+  {
+    "name": "YouTube / Lenny's Podcast",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC6t1O76G0jYXOAoYCm153dA",
+    "category_hints": ["商业", "管理"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Y Combinator",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCcefcZRL2oaA_uBNeo5UOWg",
+    "category_hints": ["商业", "管理", "AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / a16z",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UC9cn0TuPq4dnbTY-CBsm8XA",
+    "category_hints": ["商业", "管理", "AI与Agent工具"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Acquired",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCyFqFYfTW2VoIQKylJ04Rtw",
+    "category_hints": ["商业", "管理"],
+    "quality": 3
+  },
+  {
+    "name": "YouTube / Stanford eCorner",
+    "url": "https://www.youtube.com/feeds/videos.xml?channel_id=UCctkeBNtFIOn7Yl_9TTj_4w",
+    "category_hints": ["商业", "管理"],
+    "quality": 3
+  },
+  {
+    "name": "The Pragmatic Engineer",
+    "url": "https://newsletter.pragmaticengineer.com/feed",
+    "category_hints": ["商业", "管理", "工作流与知识系统"],
+    "quality": 4
+  },
+  {
+    "name": "MIT Sloan Management Review",
+    "url": "https://sloanreview.mit.edu/feed/",
+    "category_hints": ["商业", "管理"],
+    "quality": 4
+  },
+  {
+    "name": "Knowledge at Wharton",
+    "url": "https://knowledge.wharton.upenn.edu/feed/",
+    "category_hints": ["商业", "管理"],
+    "quality": 4
+  },
+  {
+    "name": "Stratechery",
+    "url": "https://stratechery.com/feed/",
+    "category_hints": ["商业"],
+    "quality": 4
+  },
+  {
+    "name": "Benedict Evans",
+    "url": "https://www.ben-evans.com/benedictevans?format=rss",
+    "category_hints": ["商业"],
+    "quality": 4
+  },
+  {
+    "name": "The Generalist",
+    "url": "https://www.generalist.com/feed",
+    "category_hints": ["商业"],
+    "quality": 4
+  },
+  {
+    "name": "Farnam Street",
+    "url": "https://fs.blog/feed/",
+    "category_hints": ["管理"],
+    "quality": 3
+  },
+  {
+    "name": "Seth Godin",
+    "url": "https://seths.blog/feed/",
+    "category_hints": ["商业", "管理"],
+    "quality": 3
+  },
+  {
+    "name": "First Round Review",
+    "url": "https://review.firstround.com/glossary/rss/",
+    "category_hints": ["管理", "商业"],
+    "quality": 4
+  },
+  {
+    "name": "First Round Podcast",
+    "url": "https://firstround.libsyn.com/rss",
+    "category_hints": ["管理", "商业"],
+    "quality": 3
+  },
+  {
+    "name": "McKinsey Insights",
+    "url": "https://www.mckinsey.com/insights/rss",
+    "category_hints": ["商业", "管理"],
+    "quality": 4
+  },
+  {
+    "name": "LeadDev",
+    "url": "https://leaddev.com/rss.xml",
+    "category_hints": ["管理", "工作流与知识系统"],
+    "quality": 3
+  },
+  {
+    "name": "量子位",
+    "url": "https://www.qbitai.com/feed",
+    "category_hints": ["AI与Agent工具"],
+    "quality": 3
+  }
+]

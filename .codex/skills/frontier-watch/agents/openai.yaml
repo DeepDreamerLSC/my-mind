@@ -1,0 +1,6 @@
+interface:
+  display_name: "前沿情报巡检"
+  short_description: "巡检 AI、工作流、商业和管理前沿信号"
+  default_prompt: "Use $frontier-watch to generate a my-mind frontier intelligence report, without writing inbox items unless explicitly requested."
+policy:
+  allow_implicit_invocation: true

@@ -7,11 +7,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Shanghai")
 
+DEFAULT_FLOW_DIR = Path("05_流转区")
 PROJECT_DESTINATION = "10_项目/个人数据资产系统/"
 KNOWLEDGE_DESTINATION = "20_资料库/"
 ATOMIC_DESTINATION = "30_原子笔记/"
@@ -19,15 +20,28 @@ PROMPT_DESTINATION = "75_提示词库/"
 SIGNAL_DESTINATION = "60_行业情报/"
 INSIGHT_DESTINATION = "65_洞察/候选洞察/"
 KEEP_DESTINATION = "保持待分拣"
+KNOWLEDGE_AI_INDUSTRY_DESTINATION = "20_资料库/人工智能产业/"
+KNOWLEDGE_AI_TOOLS_DESTINATION = "20_资料库/AI产品与工具/"
+KNOWLEDGE_WORKFLOW_DESTINATION = "20_资料库/工作流与自动化/"
+KNOWLEDGE_VISUAL_DESTINATION = "20_资料库/设计与视觉/"
+KNOWLEDGE_MANAGEMENT_DESTINATION = "20_资料库/管理与组织/"
+KNOWLEDGE_WRITING_DESTINATION = "20_资料库/写作与表达/"
+PROMPT_CAPTURE_DESTINATION = "75_提示词库/收集与录入/"
+PROMPT_DISTILL_DESTINATION = "75_提示词库/萃取与整理/"
+PROMPT_ANALYSIS_DESTINATION = "75_提示词库/分析与研究/"
+PROMPT_PROJECT_DESTINATION = "75_提示词库/项目推进/"
+PROMPT_WRITING_DESTINATION = "75_提示词库/写作与表达/"
+PROMPT_VISUAL_DESTINATION = "75_提示词库/前端与视觉/"
+PROMPT_CODEX_DESTINATION = "75_提示词库/Codex工作流/"
+SIGNAL_MODEL_DESTINATION = "60_行业情报/模型与公司/"
+SIGNAL_INFRA_DESTINATION = "60_行业情报/基础设施与算力/"
+SIGNAL_MARKET_DESTINATION = "60_行业情报/市场与商业化/"
 
 PROJECT_KEYWORDS = {
     "my-mind",
     "数据资产",
     "个人数据资产",
     "Codex",
-    "skill",
-    "Skill",
-    "提示词",
 }
 
 PROMPT_KEYWORDS = {
@@ -54,6 +68,16 @@ SIGNAL_KEYWORDS = {
     "产业",
     "趋势",
 }
+BROAD_SIGNAL_KEYWORDS = {"公司", "产业", "趋势"}
+VISUAL_KEYWORDS = {"视觉", "高级感", "网页", "PPT", "排版", "配色"}
+INGEST_KEYWORDS = {"收件箱", "入箱", "录入", "capture", "剪藏"}
+DISTILL_KEYWORDS = {"萃取", "提炼", "整理", "总结", "结构化", "对话"}
+MANAGEMENT_KEYWORDS = {"管理", "团队", "组织", "领导", "管理者", "人才"}
+WRITING_KEYWORDS = {"写作", "表达", "文章", "叙事"}
+INFRA_KEYWORDS = {"NVIDIA", "Jensen", "Huang", "CUDA", "TSMC", "HBM", "数据中心", "算力", "芯片", "供应链", "电力"}
+MARKET_KEYWORDS = {"商业", "市场", "客户", "定价", "收入", "营收", "adoption", "pricing"}
+AI_TOOL_KEYWORDS = {"OpenAI", "Anthropic", "Claude", "Codex", "Agent", "ChatGPT", "MCP", "API"}
+GENERIC_TOOL_KEYWORDS = {"产品", "工具", "模型"}
 
 
 @dataclass
@@ -166,6 +190,31 @@ def has_any(text: str, keywords: set[str]) -> bool:
     return any(keyword.lower() in lowered for keyword in keywords)
 
 
+def has_destination(destinations: list[str], prefix: str) -> bool:
+    return any(destination == prefix or destination.startswith(prefix) for destination in destinations)
+
+
+def has_visual_material(text: str) -> bool:
+    return any(keyword in text for keyword in ["视觉", "高级感", "网页", "排版", "配色"]) or bool(
+        re.search(r"\b(html|ppt)\b", text.lower())
+    )
+
+
+def has_signal_material(text: str) -> bool:
+    specific_keywords = SIGNAL_KEYWORDS - BROAD_SIGNAL_KEYWORDS
+    if has_any(text, specific_keywords):
+        return True
+    return has_any(text, BROAD_SIGNAL_KEYWORDS) and not has_any(text, MANAGEMENT_KEYWORDS)
+
+
+def has_ai_tool_material(text: str) -> bool:
+    lowered = text.lower()
+    if has_any(text, AI_TOOL_KEYWORDS):
+        return True
+    ai_context = bool(re.search(r"(?<![a-z])ai(?![a-z])", lowered)) or "人工智能" in text or "智能体" in text
+    return ai_context and has_any(text, GENERIC_TOOL_KEYWORDS)
+
+
 def strip_management_sections(body: str) -> str:
     management_headings = [
         "为什么保存",
@@ -193,7 +242,22 @@ def normalize_feedback_text(text: str) -> str:
             continue
         if line.startswith("可记录："):
             continue
-        if line in {"待补充。", "待补充", "暂无。", "暂无"}:
+        if line.startswith("如果和 Codex 交流过"):
+            continue
+        if line.startswith("如果和 Codex 交流过，"):
+            continue
+        if line in {
+            "待补充。",
+            "待补充",
+            "暂无。",
+            "暂无",
+            "待阅读后补充。",
+            "待阅读后补充",
+            "待阅读后再补充。",
+            "待阅读后再补充",
+            "待阅读后填写。",
+            "待阅读后填写",
+        }:
             continue
         cleaned_lines.append(line)
     return "\n".join(cleaned_lines).strip()
@@ -209,6 +273,17 @@ def repo_relative_path(path: Path) -> str:
         return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def markdown_relative_link(target: Path, base_dir: Path) -> str:
+    rel = Path(target).resolve()
+    try:
+        link = rel.relative_to(base_dir.resolve()).as_posix()
+    except ValueError:
+        import os
+
+        link = Path(os.path.relpath(rel, start=base_dir.resolve())).as_posix()
+    return quote(link, safe="/%")
 
 
 def classify_candidate_target(path_text: str) -> str:
@@ -301,10 +376,16 @@ def int_field(note: InboxNote, field: str) -> int:
 
 
 def summarize_value(note: InboxNote, text: str, destinations: list[str]) -> str:
-    if PROMPT_DESTINATION in destinations and PROJECT_DESTINATION in destinations:
-        return "与 Codex、提示词、skill 或自动化直接相关，适合转成可复用工作流，并反哺个人数据资产系统。"
-    if SIGNAL_DESTINATION in destinations:
-        return "包含 AI 产业、公司或技术趋势信息，适合作为行业信号和资料库素材。"
+    if has_destination(destinations, PROMPT_CODEX_DESTINATION) and has_destination(destinations, PROJECT_DESTINATION):
+        return "与 Codex 工作流、提示词或自动化直接相关，适合先进入 `75_提示词库/Codex工作流/`，再反哺个人数据资产系统。"
+    if has_destination(destinations, PROMPT_VISUAL_DESTINATION):
+        return "包含可复用的视觉约束或界面生成经验，适合沉淀到 `75_提示词库/前端与视觉/`。"
+    if has_destination(destinations, SIGNAL_DESTINATION):
+        return "包含 AI 产业、公司、模型或技术趋势信息，适合作为行业信号和资料库素材。"
+    if has_destination(destinations, KNOWLEDGE_MANAGEMENT_DESTINATION):
+        return "属于管理和组织方法素材，适合先进入 `20_资料库/管理与组织/`，再判断是否拆成原子笔记。"
+    if has_destination(destinations, KNOWLEDGE_WORKFLOW_DESTINATION):
+        return "和流程设计、自动化方法或协作闭环相关，适合先进入 `20_资料库/工作流与自动化/`。"
     if note.frontmatter.get("外部转录链接"):
         return "存在可追溯转录来源，适合先整理为资料库条目，再提炼观点和事实。"
     if note.frontmatter.get("内容摘录来源"):
@@ -316,10 +397,18 @@ def summarize_value(note: InboxNote, text: str, destinations: list[str]) -> str:
 
 def suggest_next_step(note: InboxNote, destinations: list[str], risks: list[str]) -> str:
     title = note.title
-    if PROMPT_DESTINATION in destinations:
-        return f"从《{title}》中提取可复用提示词或工作流，先写入提示词库草稿，并把对 inbox/skill 的改进点加入项目任务候选。"
-    if SIGNAL_DESTINATION in destinations:
-        return f"先整理《{title}》的来源、关键事实和可验证判断，放入资料库；涉及趋势判断的部分再进入行业情报或候选洞察。"
+    if has_destination(destinations, PROMPT_VISUAL_DESTINATION):
+        return f"从《{title}》中提取可复用视觉约束或界面生成提示词，先写入 `75_提示词库/前端与视觉/` 候选，再决定是否补 `20_资料库/设计与视觉/`。"
+    if has_destination(destinations, PROMPT_CODEX_DESTINATION):
+        return f"从《{title}》中提取可复用提示词或协作流程，先写入 `75_提示词库/Codex工作流/` 草稿，并把对 inbox/skill 的改进点加入项目任务候选。"
+    if has_destination(destinations, PROMPT_CAPTURE_DESTINATION):
+        return f"先把《{title}》中的录入或入箱方法整理到 `75_提示词库/收集与录入/`，再判断是否需要回写项目流程。"
+    if has_destination(destinations, PROMPT_DISTILL_DESTINATION):
+        return f"先把《{title}》中的萃取或整理方法整理到 `75_提示词库/萃取与整理/`，再判断是否需要扩展到项目流程。"
+    if has_destination(destinations, SIGNAL_DESTINATION):
+        return f"先整理《{title}》的来源、关键事实和可验证判断，放入 `20_资料库/人工智能产业/`；涉及趋势判断的部分再进入对应的行业情报子目录或候选洞察。"
+    if has_destination(destinations, KNOWLEDGE_MANAGEMENT_DESTINATION):
+        return f"先整理《{title}》的核心观点到 `20_资料库/管理与组织/`，确认长期可复用后再拆成 `30_原子笔记/`。"
     if note.frontmatter.get("外部转录链接"):
         return "优先基于官方转录来源做结构化摘要，避免依赖不完整的视频抓取结果。"
     if "转写质量需要校对" in "；".join(risks):
@@ -340,7 +429,7 @@ def collect_risks(note: InboxNote) -> list[str]:
         risks.append("转写质量需要校对：tiny 模型容易把英文产品名和术语识别成中文谐音。")
     if int_field(note, "内容摘录字数") > 5000:
         risks.append("内容较长，直接沉淀前需要先抽章节和主题。")
-    if has_any(note.title + "\n" + note.body[:2000], SIGNAL_KEYWORDS):
+    if has_signal_material(note.title + "\n" + note.body[:2000]):
         risks.append("涉及产品、公司、模型或产业判断，晋升洞察前需要事实核验。")
     return risks or ["暂无明显风险，但仍需人工确认后再晋升长期知识。"]
 
@@ -363,21 +452,44 @@ def triage_note(note: InboxNote) -> TriageResult:
     score = 0
 
     if is_prompt_material(text):
-        destinations.extend([PROMPT_DESTINATION, PROJECT_DESTINATION])
+        if has_visual_material(text):
+            destinations.extend([PROMPT_VISUAL_DESTINATION, KNOWLEDGE_VISUAL_DESTINATION])
+        elif has_any(text, INGEST_KEYWORDS):
+            destinations.extend([PROMPT_CAPTURE_DESTINATION, PROJECT_DESTINATION])
+        elif has_any(text, DISTILL_KEYWORDS):
+            destinations.extend([PROMPT_DISTILL_DESTINATION, PROJECT_DESTINATION])
+        elif has_any(text, WRITING_KEYWORDS):
+            destinations.extend([PROMPT_WRITING_DESTINATION, KNOWLEDGE_WRITING_DESTINATION])
+        else:
+            destinations.extend([PROMPT_CODEX_DESTINATION, PROJECT_DESTINATION, KNOWLEDGE_WORKFLOW_DESTINATION])
         score += 3
     if is_project_material(text):
         if PROJECT_DESTINATION not in destinations:
             destinations.append(PROJECT_DESTINATION)
         score += 2
-    if has_any(text, SIGNAL_KEYWORDS):
-        destinations.extend([KNOWLEDGE_DESTINATION, SIGNAL_DESTINATION])
+    signal_material = has_signal_material(text)
+
+    if has_any(text, MANAGEMENT_KEYWORDS):
+        destinations.extend([KNOWLEDGE_MANAGEMENT_DESTINATION, ATOMIC_DESTINATION])
+        score += 2
+    if has_ai_tool_material(text) and not signal_material and not is_prompt_material(text):
+        destinations.append(KNOWLEDGE_AI_TOOLS_DESTINATION)
+        score += 1
+    if signal_material:
+        destinations.append(KNOWLEDGE_AI_INDUSTRY_DESTINATION)
+        if has_any(text, INFRA_KEYWORDS):
+            destinations.append(SIGNAL_INFRA_DESTINATION)
+        elif has_any(text, MARKET_KEYWORDS):
+            destinations.append(SIGNAL_MARKET_DESTINATION)
+        else:
+            destinations.append(SIGNAL_MODEL_DESTINATION)
         score += 2
     if note.frontmatter.get("外部转录链接"):
-        if KNOWLEDGE_DESTINATION not in destinations:
-            destinations.append(KNOWLEDGE_DESTINATION)
+        if KNOWLEDGE_AI_INDUSTRY_DESTINATION not in destinations:
+            destinations.append(KNOWLEDGE_AI_INDUSTRY_DESTINATION)
         score += 2
     if note.frontmatter.get("内容摘录来源"):
-        if KNOWLEDGE_DESTINATION not in destinations:
+        if KNOWLEDGE_AI_INDUSTRY_DESTINATION not in destinations and KNOWLEDGE_AI_TOOLS_DESTINATION not in destinations:
             destinations.append(KNOWLEDGE_DESTINATION)
         score += 1
     if int_field(note, "内容摘录字数") > 5000:
@@ -448,7 +560,7 @@ def render_report(results: list[TriageResult], reading_queue: list[TriageResult]
         f"- 高优先级：{counts['高']}",
         f"- 中优先级：{counts['中']}",
         f"- 低优先级：{counts['低']}",
-        f"- 待沉淀数量：{len(reading_queue)}",
+        f"- 已分拣流转数量：{len(reading_queue)}",
         f"- 写入策略：{write_strategy}",
         "",
         "## 待分拣建议",
@@ -462,9 +574,9 @@ def render_report(results: list[TriageResult], reading_queue: list[TriageResult]
         for index, result in enumerate(ordered, start=1):
             lines.extend(render_result_block(result, index))
 
-    lines.extend(["", "## 待沉淀队列"])
+    lines.extend(["", "## 已分拣流转队列"])
     if not reading_queue:
-        lines.extend(["", "当前没有等待用户阅读反馈或后续确认的待沉淀条目。"])
+        lines.extend(["", "当前没有等待用户阅读反馈或后续确认的已分拣条目。"])
         return "\n".join(lines).rstrip() + "\n"
 
     priority_order = {"高": 0, "中": 1, "低": 2}
@@ -472,6 +584,163 @@ def render_report(results: list[TriageResult], reading_queue: list[TriageResult]
     for index, result in enumerate(ordered_queue, start=1):
         lines.extend(render_result_block(result, index, include_reading_feedback=True))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def source_url(note: InboxNote) -> str:
+    for field in ["来源链接", "原始链接", "外部转录链接"]:
+        value = str(note.frontmatter.get(field) or "").strip()
+        if value.startswith(("http://", "https://")):
+            return value
+    match = re.search(r"https?://[^\s)>\"]+", note.body)
+    return match.group(0).rstrip("。，,；;") if match else ""
+
+
+def needs_verification(result: TriageResult) -> bool:
+    risk_text = "\n".join(result.risks)
+    return any(
+        keyword in risk_text
+        for keyword in [
+            "需要确认",
+            "需要校对",
+            "事实核验",
+            "转写质量",
+            "字段可能",
+            "官方转录",
+            "内容较长",
+            "产业判断",
+        ]
+    )
+
+
+def render_flow_item(result: TriageResult, index: int, target_path: Path) -> list[str]:
+    note = result.note
+    phase, candidate_paths, strategy = summarize_pending_stage(note)
+    source = source_url(note)
+    note_link = markdown_relative_link(note.path, target_path.parent)
+    lines = [
+        f"### {index}. {note.title}",
+        "",
+        f"- 优先级：{result.priority}",
+        f"- 当前阶段：{phase}",
+        f"- 建议去向：{'、'.join(result.destinations)}",
+        f"- 核心价值：{result.value}",
+        f"- 下一步：{result.next_step}",
+        f"- 建议处理策略：{strategy}",
+        f"- 来源文件：[{repo_relative_path(note.path)}]({note_link})",
+        f"- 原文链接：{source or '暂无'}",
+        f"- 已有候选：{'、'.join(f'`{path}`' for path in candidate_paths) if candidate_paths else '暂无'}",
+        f"- 读后反馈：{READING_FEEDBACK_PROMPT}",
+        "- 风险：",
+    ]
+    lines.extend(f"  - {risk}" for risk in result.risks)
+    lines.append("")
+    return lines
+
+
+def render_flow_view(title: str, description: str, items: list[TriageResult], target_path: Path) -> str:
+    generated_at = dt.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S %z")
+    lines = [
+        f"# {title}",
+        "",
+        description,
+        "",
+        "## 使用边界",
+        "",
+        "- 这是流转视图，不是长期知识正文。",
+        "- 文件可由 `inbox-triage` 自动覆盖；真正的来源事实仍以收件箱原文和原始链接为准。",
+        "- 用户读完后的判断应回写到来源笔记的 `阅读思考`，再触发候选沉淀。",
+        "",
+        "## 总览",
+        "",
+        f"- 更新时间：{generated_at}",
+        f"- 条目数量：{len(items)}",
+        "",
+        "## 队列",
+        "",
+    ]
+    if not items:
+        lines.append("当前没有条目。")
+        return "\n".join(lines).rstrip() + "\n"
+
+    priority_order = {"高": 0, "中": 1, "低": 2}
+    ordered = sorted(items, key=lambda item: (priority_order[item.priority], -item.score, item.note.title))
+    for index, result in enumerate(ordered, start=1):
+        lines.extend(render_flow_item(result, index, target_path))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def render_flow_overview(
+    reading_items: list[TriageResult],
+    distill_items: list[TriageResult],
+    verification_items: list[TriageResult],
+    flow_dir: Path,
+) -> str:
+    generated_at = dt.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S %z")
+    return "\n".join(
+        [
+            "# 当前流转总览",
+            "",
+            "这里是 `my-mind` 的短期行动面板，用来承接收件箱和长期知识之间的中间状态。",
+            "",
+            "## 当前队列",
+            "",
+            f"- 更新时间：{generated_at}",
+            f"- 待读：{len(reading_items)}",
+            f"- 待沉淀：{len(distill_items)}",
+            f"- 待核验：{len(verification_items)}",
+            "",
+            "## 队列入口",
+            "",
+            f"- [收件箱待读队列]({markdown_relative_link(flow_dir / '10_待读' / '收件箱待读队列.md', flow_dir)})",
+            f"- [收件箱待沉淀队列]({markdown_relative_link(flow_dir / '30_待沉淀' / '收件箱待沉淀队列.md', flow_dir)})",
+            f"- [收件箱待核验队列]({markdown_relative_link(flow_dir / '40_待核验' / '收件箱待核验队列.md', flow_dir)})",
+            "",
+            "## 规则",
+            "",
+            "- 收件箱保存原始捕获，不因为进入流转区而移动或删除。",
+            "- 流转区只保存行动视图，可以被自动刷新。",
+            "- 长期知识仍进入资料库、原子笔记、行业情报、洞察、提示词库或项目目录。",
+        ]
+    ).rstrip() + "\n"
+
+
+def write_flow_views(reading_queue: list[TriageResult], flow_dir: Path) -> list[Path]:
+    reading_items: list[TriageResult] = []
+    distill_items: list[TriageResult] = []
+    verification_items: list[TriageResult] = []
+
+    for result in reading_queue:
+        phase, _, _ = summarize_pending_stage(result.note)
+        if phase in {"已阅读待生成候选", "已有候选待确认"}:
+            distill_items.append(result)
+        else:
+            reading_items.append(result)
+        if needs_verification(result):
+            verification_items.append(result)
+
+    paths = [
+        flow_dir / "当前流转总览.md",
+        flow_dir / "10_待读" / "收件箱待读队列.md",
+        flow_dir / "30_待沉淀" / "收件箱待沉淀队列.md",
+        flow_dir / "40_待核验" / "收件箱待核验队列.md",
+    ]
+    for path in paths:
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+    paths[0].write_text(render_flow_overview(reading_items, distill_items, verification_items, flow_dir), encoding="utf-8")
+    paths[1].write_text(
+        render_flow_view("收件箱待读队列", "已完成分拣、等待用户阅读和反馈的资料。", reading_items, paths[1]),
+        encoding="utf-8",
+    )
+    paths[2].write_text(
+        render_flow_view("收件箱待沉淀队列", "已有阅读反馈或候选草稿、等待继续沉淀或确认的资料。", distill_items, paths[2]),
+        encoding="utf-8",
+    )
+    paths[3].write_text(
+        render_flow_view("收件箱待核验队列", "存在解析、转写、来源或事实风险，正式沉淀前需要校对的资料。", verification_items, paths[3]),
+        encoding="utf-8",
+    )
+    return paths
 
 
 def yaml_scalar(value: Any) -> str:
@@ -552,7 +821,8 @@ def build_sorted_source(note: InboxNote, result: TriageResult) -> str:
     updated = "\n".join(lines).rstrip() + "\n"
 
     today = dt.datetime.now(TZ).strftime("%Y-%m-%d")
-    summary = f"- {today}：已自动分拣。建议去向：{'、'.join(result.destinations)}。核心价值：{result.value}。下一步：先阅读原文，再在对话中反馈是否继续沉淀。"
+    value = result.value.rstrip("。；; ")
+    summary = f"- {today}：已自动分拣。建议去向：{'、'.join(result.destinations)}。核心价值：{value}。下一步：先阅读原文，再在对话中反馈是否继续沉淀。"
     if summary in updated:
         return updated
     if "## 分拣记录" in updated:
@@ -587,6 +857,8 @@ def main() -> int:
     parser.add_argument("--write", action="store_true", help="Write the report to --report-dir.")
     parser.add_argument("--mark-sorted", action="store_true", help="Mark current 待分拣 notes as 已分拣 and append 分拣记录.")
     parser.add_argument("--report-dir", default="85_运行记录", help="Directory for written reports.")
+    parser.add_argument("--flow-dir", default=str(DEFAULT_FLOW_DIR), help="Directory for refreshed flow views.")
+    parser.add_argument("--no-flow", action="store_true", help="Do not refresh 05_流转区 views when --write is used.")
     args = parser.parse_args()
 
     inbox = Path(args.inbox)
@@ -614,6 +886,11 @@ def main() -> int:
     if args.write:
         path = write_report(report, Path(args.report_dir))
         print(f"\n已写入：{path}")
+        if not args.no_flow:
+            flow_paths = write_flow_views(reading_queue, Path(args.flow_dir))
+            print("\n已更新流转区：")
+            for flow_path in flow_paths:
+                print(f"- {flow_path}")
     if args.mark_sorted and results:
         print(f"\n已自动分拣：{len(results)} 条")
     return 0

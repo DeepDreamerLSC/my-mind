@@ -1,11 +1,11 @@
 ---
 name: frontdesk-push
-description: Generate a Chinese frontdesk reading-card note for OpenClaw and Feishu mobile reading from my-mind inbox and project status. Use when the user asks to 生成前台推送, 给 OpenClaw 推送内容, create frontdesk push, or prepare pending-reading/distillation items for OpenClaw. Writes 85_运行记录/前台推送-*.md and never modifies long-term knowledge.
+description: Generate a Chinese frontdesk reading-card note for OpenClaw and Feishu mobile reading from my-mind flow-zone queues, inbox notes, and project status. Use when the user asks to 生成前台推送, 给 OpenClaw 推送内容, create frontdesk push, or prepare pending-reading/distillation items for OpenClaw. Writes 85_运行记录/前台推送-*.md and never modifies long-term knowledge.
 ---
 
 # 前台推送生成
 
-把 Codex 后台看到的收件箱和项目进度，整理成 OpenClaw 可以转发、飞书可以承载的手机阅读卡片。
+把 Codex 后台看到的 `05_流转区/` 队列、收件箱正文和项目进度，整理成 OpenClaw 可以转发、飞书可以承载的手机阅读卡片。
 
 OpenClaw 直接发消息时只需要发标题、链接和回复指令；完整内容适合发布到飞书文档或知识库节点后让用户在手机上阅读。
 
@@ -27,6 +27,12 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-ru
 
 ```bash
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --limit 5
+```
+
+默认使用 `05_流转区/10_待读/收件箱待读队列.md` 决定推送优先级，再回到 `00_收件箱/` 读取正文摘录。临时忽略流转区排序：
+
+```bash
+python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --ignore-flow
 ```
 
 调整每条阅读摘录长度：
@@ -60,6 +66,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 - 不写入长期知识目录。
 - 不确认事实、观点、项目决策或沉淀结果。
 - OpenClaw 只需要读取最新 `前台推送-*.md`，把飞书链接或精简摘要推给用户。
+- 推送优先级来自流转区；流转区缺失时才回退到收件箱评分排序。
 
 ## 设计依据
 

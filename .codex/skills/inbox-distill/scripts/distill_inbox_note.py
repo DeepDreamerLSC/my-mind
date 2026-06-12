@@ -12,6 +12,14 @@ from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Shanghai")
 PROJECT_NAME = "个人数据资产系统"
+PROMPT_ROOT_DIR = Path("75_提示词库")
+PROMPT_CAPTURE_DIR = PROMPT_ROOT_DIR / "收集与录入"
+PROMPT_DISTILL_DIR = PROMPT_ROOT_DIR / "萃取与整理"
+PROMPT_ANALYSIS_DIR = PROMPT_ROOT_DIR / "分析与研究"
+PROMPT_PROJECT_DIR = PROMPT_ROOT_DIR / "项目推进"
+PROMPT_WRITING_DIR = PROMPT_ROOT_DIR / "写作与表达"
+PROMPT_VISUAL_DIR = PROMPT_ROOT_DIR / "前端与视觉"
+PROMPT_CODEX_DIR = PROMPT_ROOT_DIR / "Codex工作流"
 
 
 @dataclass
@@ -155,6 +163,32 @@ def infer_scenarios(source_text: str) -> list[str]:
     return scenarios or ["需要把一段外部经验转成可复用提示词时。", "需要让 Codex 先分析流程再执行任务时。"]
 
 
+def is_visual_material(text: str) -> bool:
+    return any(keyword in text for keyword in ["视觉", "高级感", "网页", "排版", "配色"]) or bool(
+        re.search(r"\b(html|ppt)\b", text.lower())
+    )
+
+
+def infer_prompt_output_dir(note: InboxNote, source_text: str) -> Path:
+    text = f"{note.title}\n{source_text}"
+    lowered = text.lower()
+    if is_visual_material(text):
+        return PROMPT_VISUAL_DIR
+    if any(keyword in text for keyword in ["收件箱", "入箱", "录入", "capture", "剪藏"]):
+        return PROMPT_CAPTURE_DIR
+    if any(keyword in text for keyword in ["萃取", "提炼", "整理", "总结", "结构化", "对话"]):
+        return PROMPT_DISTILL_DIR
+    if any(keyword in lowered for keyword in ["codex", "openai", "skill", "prompt", "agent", "workflow"]) or any(
+        keyword in text for keyword in ["工作流", "自动化", "提示词", "subagent", "reviewer", "feature_coder", "验收"]
+    ):
+        return PROMPT_CODEX_DIR
+    if any(keyword in text for keyword in ["复盘", "任务", "推进", "计划", "执行", "项目"]):
+        return PROMPT_PROJECT_DIR
+    if any(keyword in text for keyword in ["写作", "表达", "文案", "文章", "叙事"]):
+        return PROMPT_WRITING_DIR
+    return PROMPT_ANALYSIS_DIR
+
+
 def build_prompt_body(note: InboxNote, source_text: str) -> str:
     if "feature_coder" in source_text or "feature_reviewer" in source_text:
         return """请先判断当前任务属于“小 Feature”还是“大 Feature”，并按对应流程推进。
@@ -213,7 +247,7 @@ def build_prompt_body(note: InboxNote, source_text: str) -> str:
 {compact_text(source_text, 1400)}"""
 
 
-def build_prompt_candidate(note: InboxNote) -> tuple[str, str]:
+def build_prompt_candidate(note: InboxNote) -> tuple[str, str, Path]:
     copy = extract_section(note.body, "文案摘录")
     summary = extract_section(note.body, "摘要")
     key_points = extract_section(note.body, "关键点")
@@ -223,6 +257,7 @@ def build_prompt_candidate(note: InboxNote) -> tuple[str, str]:
     purpose = infer_prompt_purpose(note, source_text)
     scenarios = infer_scenarios(source_text)
     prompt_body = build_prompt_body(note, source_text)
+    output_dir = infer_prompt_output_dir(note, source_text)
     today = dt.datetime.now(TZ).strftime("%Y-%m-%d")
     source_rel = note.path.as_posix()
     source_url = note.frontmatter.get("来源链接") or note.frontmatter.get("原始链接") or ""
@@ -287,7 +322,7 @@ def build_prompt_candidate(note: InboxNote) -> tuple[str, str]:
             "- 如果涉及权限、提交、推送或生产环境操作，必须单独确认。",
         ]
     )
-    return title, "\n".join(content).rstrip() + "\n"
+    return title, "\n".join(content).rstrip() + "\n", output_dir
 
 
 def set_scalar_field(lines: list[str], key: str, value: str) -> list[str]:
@@ -387,15 +422,22 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Distill one my-mind inbox note into a candidate artifact.")
     parser.add_argument("--source", required=True, help="Source inbox note path.")
     parser.add_argument("--target", choices=["prompt"], default="prompt", help="Distillation target type. First version only supports prompt.")
-    parser.add_argument("--output-dir", default="75_提示词库", help="Output directory for prompt candidates.")
-    parser.add_argument("--write", action="store_true", help="Write files and update source. Default is dry-run preview.")
+    parser.add_argument(
+        "--output-dir",
+        default="",
+        help="Override output directory for prompt candidates. Default is to infer a subfolder under 75_提示词库/.",
+    )
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--write", action="store_true", help="Write files and update source. Default is dry-run preview.")
+    mode.add_argument("--dry-run", action="store_true", help="Preview only without writing. This is the default behavior.")
     parser.add_argument("--force", action="store_true", help="Allow overwriting existing target file.")
     args = parser.parse_args()
 
     source_path = Path(args.source)
     note = load_note(source_path)
-    title, candidate = build_prompt_candidate(note)
-    target_path = Path(args.output_dir) / f"{title}.md"
+    title, candidate, inferred_output_dir = build_prompt_candidate(note)
+    output_dir = Path(args.output_dir) if args.output_dir else inferred_output_dir
+    target_path = output_dir / f"{title}.md"
     updated_source = build_updated_source(note, target_path, title)
 
     print(f"来源：{source_path}")
