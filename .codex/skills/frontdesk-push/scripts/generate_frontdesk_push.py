@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,6 +19,7 @@ DEFAULT_INBOX = ROOT / "00_收件箱"
 DEFAULT_FLOW_DIR = ROOT / "05_流转区"
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 DEFAULT_PROJECT_DIR = ROOT / "10_项目" / "个人数据资产系统"
+DEFAULT_PUSH_STATE = DEFAULT_RUN_DIR / "前台推送状态.json"
 FLOW_PRIORITY_FALLBACK = 999_999
 
 
@@ -35,11 +38,14 @@ HIGH_KEYWORDS = [
 ]
 MEDIUM_KEYWORDS = ["人工智能", "ai", "管理", "项目", "知识", "复盘", "资料库", "原子笔记"]
 TERMINAL_STATUSES = {"已处理", "已晋升", "可丢弃", "已归档"}
+LOW_QUALITY_STATUSES = {"需继续解析"}
 
 
 @dataclass
 class InboxNote:
     path: Path
+    item_id: str
+    content_hash: str
     title: str
     platform: str
     author: str
@@ -48,6 +54,8 @@ class InboxNote:
     transcript_url: str
     process_status: str
     parse_status: str
+    content_quality: str
+    quality_gate: str
     summary: str
     reading_excerpt: str
     quality_note: str
@@ -67,8 +75,127 @@ def now_filename() -> str:
     return dt.datetime.now(TZ).strftime("%Y-%m-%d-%H%M")
 
 
+def now_iso() -> str:
+    return dt.datetime.now(TZ).isoformat(timespec="seconds")
+
+
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
+
+
+def sha1_text(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def load_jsonl(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, object]] = []
+    for line in read_text(path).splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def load_push_state(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {"version": 1, "items": {}}
+    try:
+        data = json.loads(read_text(path))
+    except json.JSONDecodeError:
+        return {"version": 1, "items": {}}
+    if not isinstance(data, dict):
+        return {"version": 1, "items": {}}
+    if not isinstance(data.get("items"), dict):
+        data["items"] = {}
+    data.setdefault("version", 1)
+    return data
+
+
+def save_push_state(path: Path, state: dict[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def apply_feedback_status_from_queue(state: dict[str, object], run_dir: Path) -> None:
+    items = state.setdefault("items", {})
+    if not isinstance(items, dict):
+        return
+    queue_path = run_dir / "前台反馈队列.jsonl"
+    for record in load_jsonl(queue_path):
+        source = str(record.get("来源文件") or "")
+        if not source:
+            continue
+        item = items.get(source)
+        if not isinstance(item, dict):
+            continue
+        action = str(record.get("动作") or "已反馈")
+        feedback_time = str(record.get("时间") or "")
+        item["feedback_status"] = action
+        item["last_feedback_at"] = feedback_time
+        item["last_feedback_content"] = str(record.get("内容") or record.get("原始回复") or "")
+
+
+def parse_iso_datetime(value: str) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=TZ)
+    return parsed.astimezone(TZ)
+
+
+def eligible_by_cooldown(note: InboxNote, state: dict[str, object], cooldown_hours: int) -> tuple[bool, str]:
+    if cooldown_hours <= 0:
+        return True, ""
+    items = state.get("items")
+    if not isinstance(items, dict):
+        return True, ""
+    item = items.get(note.item_id)
+    if not isinstance(item, dict):
+        return True, ""
+    if str(item.get("feedback_status") or "") != "待反馈":
+        return True, ""
+    pushed_at = parse_iso_datetime(str(item.get("last_pushed_at") or ""))
+    if not pushed_at:
+        return True, ""
+    next_time = pushed_at + dt.timedelta(hours=cooldown_hours)
+    if dt.datetime.now(TZ) < next_time:
+        return False, f"冷却中，上次推送 {pushed_at.strftime('%Y-%m-%d %H:%M')}"
+    return True, ""
+
+
+def update_push_state(state: dict[str, object], selected: list[InboxNote], output_path: Path) -> None:
+    items = state.setdefault("items", {})
+    if not isinstance(items, dict):
+        state["items"] = {}
+        items = state["items"]
+    pushed_at = now_iso()
+    for note in selected:
+        previous = items.get(note.item_id)
+        if not isinstance(previous, dict):
+            previous = {}
+        previous_count = int(previous.get("push_count") or 0)
+        items[note.item_id] = {
+            **previous,
+            "title": note.title,
+            "source_file": note.item_id,
+            "content_hash": note.content_hash,
+            "last_pushed_at": pushed_at,
+            "last_push_file": output_path.relative_to(ROOT).as_posix() if output_path.is_relative_to(ROOT) else output_path.as_posix(),
+            "feedback_status": "待反馈",
+            "push_count": previous_count + 1,
+        }
+    state["updated_at"] = pushed_at
 
 
 def split_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -330,6 +457,12 @@ def distill_direction(meta: dict[str, str], body: str) -> str:
 
 def quality_note(meta: dict[str, str], body: str) -> str:
     notes: list[str] = []
+    if meta.get("内容质量") == "需继续解析":
+        notes.append("内容质量门禁要求继续解析，本条不适合直接推送为阅读材料。")
+    elif meta.get("内容质量") == "需核验":
+        notes.append("内容质量门禁要求核验，阅读时只适合看大意，沉淀前必须校对。")
+    if meta.get("质量门禁"):
+        notes.append(meta["质量门禁"])
     if meta.get("解析状态") != "已解析":
         notes.append("解析状态尚未完全确认，阅读前先关注内容是否完整。")
     if "模型：tiny" in body or "- 模型：tiny" in body:
@@ -404,9 +537,12 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int, flow_priority: dict[str, i
         excerpt = reading_excerpt(body, excerpt_chars)
         summary = short_summary(body, excerpt)
         score = note_score(meta, body)
+        content_hash = sha1_text("\n".join([title, source_url, summary, excerpt, meta.get("内容摘录字数", ""), meta.get("图片OCR字数", "")]))
         notes.append(
             InboxNote(
                 path=path,
+                item_id=rel_path,
+                content_hash=content_hash,
                 title=title,
                 platform=platform,
                 author=author,
@@ -415,6 +551,8 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int, flow_priority: dict[str, i
                 transcript_url=transcript_url,
                 process_status=status or "未知",
                 parse_status=meta.get("解析状态") or "未知",
+                content_quality=meta.get("内容质量") or "未标记",
+                quality_gate=meta.get("质量门禁") or "",
                 summary=summary,
                 reading_excerpt=excerpt,
                 quality_note=quality_note(meta, body),
@@ -458,6 +596,7 @@ def build_push(notes: list[InboxNote], project_dir: Path, limit: int) -> str:
         f"- 生成时间：{now_datetime()}",
         "- 生成来源：Codex / frontdesk-push",
         f"- 候选条目：{len(notes)}",
+        "- 推送节流：默认跳过冷却期内且尚未收到反馈的条目；完整队列仍以 `05_流转区/` 为准。",
         "- 用途：供飞书手机阅读页或 OpenClaw 前台摘要使用；OpenClaw 直接发消息时建议只转发标题、链接和回复指令。",
         "",
         "## 今天最值得读",
@@ -474,9 +613,11 @@ def build_push(notes: list[InboxNote], project_dir: Path, limit: int) -> str:
                 "",
                 f"- 来源：{note.platform} / {note.author}",
                 f"- 状态：{note.process_status} / {note.parse_status}",
+                f"- 内容质量：{note.content_quality}",
                 f"- 为什么值得读：{note.value}",
                 f"- 建议动作：{note.action}",
                 f"- 建议沉淀方向：{note.distill_direction}",
+                f"- 推送标识：`{note.item_id}`",
                 f"- 来源文件：`{rel_path}`",
             ]
         )
@@ -565,8 +706,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flow-dir", default=str(DEFAULT_FLOW_DIR), help="Flow-zone directory used to prioritize pending reading items.")
     parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR), help="Directory for frontdesk push notes.")
     parser.add_argument("--project-dir", default=str(DEFAULT_PROJECT_DIR), help="Project directory for progress summary.")
+    parser.add_argument("--state-file", default=str(DEFAULT_PUSH_STATE), help="Push state JSON used for cooldown and feedback status.")
     parser.add_argument("--limit", type=int, default=0, help="Maximum pushed inbox items. Use 0 to include all candidates.")
     parser.add_argument("--excerpt-chars", type=int, default=1200, help="Maximum reading excerpt characters per item.")
+    parser.add_argument("--cooldown-hours", type=int, default=24, help="Skip items pushed without feedback within this many hours. Use 0 to disable.")
+    parser.add_argument("--include-low-quality", action="store_true", help="Include notes marked 内容质量=需继续解析.")
+    parser.add_argument("--force", action="store_true", help="Ignore push cooldown.")
+    parser.add_argument("--no-state", action="store_true", help="Do not read or update push state.")
     parser.add_argument("--ignore-flow", action="store_true", help="Ignore 05_流转区 priority and rank directly from inbox notes.")
     parser.add_argument("--dry-run", action="store_true", help="Print push note instead of writing it.")
     return parser.parse_args()
@@ -578,6 +724,7 @@ def main() -> int:
     flow_dir = Path(args.flow_dir)
     run_dir = Path(args.run_dir)
     project_dir = Path(args.project_dir)
+    state_file = Path(args.state_file)
     if not inbox.is_absolute():
         inbox = ROOT / inbox
     if not flow_dir.is_absolute():
@@ -586,9 +733,26 @@ def main() -> int:
         run_dir = ROOT / run_dir
     if not project_dir.is_absolute():
         project_dir = ROOT / project_dir
+    if not state_file.is_absolute():
+        state_file = ROOT / state_file
 
     flow_priority = {} if args.ignore_flow else parse_flow_priority(flow_dir)
-    note = build_push(load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority), project_dir, args.limit)
+    all_notes = load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority)
+    if not args.include_low_quality:
+        all_notes = [note for note in all_notes if note.content_quality not in LOW_QUALITY_STATUSES]
+    state = {"version": 1, "items": {}} if args.no_state else load_push_state(state_file)
+    if not args.no_state:
+        apply_feedback_status_from_queue(state, run_dir)
+    if args.force or args.no_state:
+        eligible = all_notes
+    else:
+        eligible = []
+        for candidate in all_notes:
+            is_eligible, _reason = eligible_by_cooldown(candidate, state, max(args.cooldown_hours, 0))
+            if is_eligible:
+                eligible.append(candidate)
+    selected = eligible if args.limit <= 0 else eligible[: args.limit]
+    note = build_push(selected, project_dir, 0)
     if args.dry_run:
         print(note, end="")
         return 0
@@ -596,6 +760,9 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     output_path = unique_path(run_dir, f"前台推送-{now_filename()}.md")
     output_path.write_text(note, encoding="utf-8")
+    if not args.no_state:
+        update_push_state(state, selected, output_path)
+        save_push_state(state_file, state)
     print(output_path.relative_to(ROOT) if output_path.is_relative_to(ROOT) else output_path)
     return 0
 

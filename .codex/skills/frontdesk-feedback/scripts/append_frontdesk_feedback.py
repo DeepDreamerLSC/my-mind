@@ -68,6 +68,12 @@ def parse_push_targets(path: Path | None) -> dict[str, dict[str, str]]:
 
 
 def infer_action(reply: str) -> str:
+    stripped = reply.strip()
+    prefix_tail = r"[\s:：,，;；.!！?？-]*"
+    for action, aliases in ACTION_ALIASES:
+        for alias in aliases:
+            if re.match(rf"^{re.escape(alias)}{prefix_tail}", stripped, flags=re.I):
+                return action
     for action, aliases in ACTION_ALIASES:
         if any(alias in reply for alias in aliases):
             return action

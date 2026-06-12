@@ -29,6 +29,18 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-ru
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --limit 5
 ```
 
+默认会读取 `85_运行记录/前台推送状态.json`，跳过 24 小时内已经推送但尚未收到反馈的条目，避免 OpenClaw 反复催同一批内容。调整冷却时间：
+
+```bash
+python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --cooldown-hours 48
+```
+
+忽略冷却并强制生成：
+
+```bash
+python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --force
+```
+
 默认使用 `05_流转区/10_待读/收件箱待读队列.md` 决定推送优先级，再回到 `00_收件箱/` 读取正文摘录。临时忽略流转区排序：
 
 ```bash
@@ -47,6 +59,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 
 ```text
 85_运行记录/前台推送-YYYY-MM-DD-HHMM.md
+85_运行记录/前台推送状态.json
 ```
 
 内容包含：
@@ -67,6 +80,8 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 - 不确认事实、观点、项目决策或沉淀结果。
 - OpenClaw 优先读取 `飞书发布记录.jsonl` 里的最新飞书链接；没有飞书链接时再读取最新 `前台推送-*.md`，把精简摘要推给用户。
 - 推送优先级来自流转区；流转区缺失时才回退到收件箱评分排序。
+- 默认不推送 `内容质量: 需继续解析` 的条目；需要临时包含时显式加 `--include-low-quality`。
+- 推送状态只记录触达和反馈状态，不改变长期知识。
 
 ## 设计依据
 

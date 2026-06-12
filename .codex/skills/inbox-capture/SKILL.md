@@ -22,6 +22,7 @@ First version:
 - For public short video links whose media/audio URL is exposed by the platform page or `yt-dlp`, extract audio with `ffmpeg` by default, transcribe with an available backend, normalize transcription output to Simplified Chinese, apply a small glossary for common AI/product terms such as Codex, OpenAI, Skill, Prompt, and PPT, then write a content summary, key points, full timeline excerpt, and full transcription excerpt. Use `--no-extract-content` only when the frontdesk path must skip video transcription.
 - Write a Chinese Markdown inbox note.
 - Preserve the original URL/content.
+- Mark a downstream content gate: `内容质量: 可推送 / 需核验 / 需继续解析` plus `质量门禁`. Frontdesk push should skip `需继续解析` by default.
 
 Out of scope for first version:
 
@@ -81,6 +82,8 @@ If a video note has empty `内容摘录来源`, tell the user it is “已入箱
 - Use Chinese visible fields.
 - Set `处理状态: 待分拣`.
 - Set `解析状态` to one of `已解析`, `部分解析`, `解析失败`.
+- Set `内容质量` to one of `可推送`, `需核验`, `需继续解析`.
+- Set `质量门禁` to a short reason that downstream triage and frontdesk push can reuse.
 - Set `敏感状态: 未知` unless the user-provided text clearly contains credentials, private personal data, or secrets.
 
 ## Notes

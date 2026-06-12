@@ -1,0 +1,4 @@
+interface:
+  display_name: "后台总控"
+  short_description: "巡检 my-mind 后台自动化、推送节流和系统健康。"
+  default_prompt: "Use $backend-control to inspect my-mind backend automation health and suggest the next safe actions."

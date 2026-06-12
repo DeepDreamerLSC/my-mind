@@ -419,6 +419,12 @@ def suggest_next_step(note: InboxNote, destinations: list[str], risks: list[str]
 def collect_risks(note: InboxNote) -> list[str]:
     risks: list[str] = []
     parse_status = str(note.frontmatter.get("解析状态") or "")
+    content_quality = str(note.frontmatter.get("内容质量") or "")
+    quality_gate = str(note.frontmatter.get("质量门禁") or "")
+    if content_quality == "需继续解析":
+        risks.append(f"内容质量门禁为「需继续解析」：{quality_gate or '缺少可读摘录，不适合直接推送或沉淀。'}")
+    elif content_quality == "需核验":
+        risks.append(f"内容质量门禁为「需核验」：{quality_gate or '可先读大意，沉淀前需要校对。'}")
     if parse_status and parse_status != "已解析":
         risks.append(f"解析状态为「{parse_status}」，需要确认基础信息是否完整。")
     if note.platform in {"抖音", "小红书", "X", "TikTok"}:

@@ -4309,6 +4309,69 @@ def subtitle_languages(info: dict[str, Any], key: str) -> list[str]:
     return sorted(str(lang) for lang in subtitles.keys())
 
 
+def intish(value: Any) -> int:
+    try:
+        return int(re.sub(r"\D+", "", str(value)) or "0")
+    except ValueError:
+        return 0
+
+
+def assess_content_quality(
+    *,
+    platform: str,
+    material_type: str,
+    parse_status: str,
+    description: str,
+    platform_meta: dict[str, Any],
+    content_extract: dict[str, Any] | None,
+    content_extract_error: str,
+    image_ocr: dict[str, Any] | None,
+    image_ocr_error: str,
+    youtube_subtitle: dict[str, Any] | None,
+    external_transcript: dict[str, Any] | None,
+) -> tuple[str, str]:
+    """Return a coarse quality gate for downstream triage and frontdesk push."""
+    if parse_status == "解析失败":
+        return "需继续解析", "基础解析失败，只保留了链接和失败原因；不应进入前台阅读推送。"
+
+    has_content_extract = bool(content_extract and intish(content_extract.get("word_count")) >= 120)
+    has_image_ocr = bool(image_ocr and intish(image_ocr.get("word_count")) >= 80)
+    has_description = len(description.strip()) >= 120
+    has_external_source = bool(youtube_subtitle or external_transcript)
+    is_video = material_type == "视频链接" or platform in {"抖音", "YouTube", "TikTok"}
+    is_xhs_image = platform == "小红书" and intish(platform_meta.get("图片数")) > 0
+
+    if is_video and not has_content_extract:
+        if has_external_source:
+            return "需核验", "已有字幕或外部转录来源，但收件箱未生成正文级摘要；推送前建议先整理摘要。"
+        reason = content_extract_error or "视频内容尚未转写。"
+        return "需继续解析", f"{reason} 不应直接进入前台阅读推送。"
+
+    if is_xhs_image and not has_image_ocr:
+        reason = image_ocr_error or "小红书图文尚未获得可读 OCR。"
+        return "需继续解析", f"{reason} 不应直接进入前台阅读推送。"
+
+    if content_extract:
+        model = str(content_extract.get("model") or "")
+        if model == "tiny":
+            return "需核验", "视频已转写，但 tiny 模型容易误识别英文产品名和中文术语；沉淀前必须校对。"
+        if intish(content_extract.get("word_count")) < 300:
+            return "需核验", "视频转写字数偏少，可能只抓到片段；推送时只适合快速判断。"
+
+    if image_ocr:
+        errors = image_ocr.get("errors") if isinstance(image_ocr.get("errors"), list) else []
+        if errors:
+            return "需核验", "图片 OCR 已生成，但存在部分图片处理失败；沉淀前需要校对。"
+
+    if parse_status == "部分解析":
+        return "需核验", "主解析失败但备用解析保留了部分信息；正式沉淀前需要核验来源字段。"
+
+    if has_content_extract or has_image_ocr or has_description:
+        return "可推送", "已具备可读摘录，可进入分拣和前台阅读候选。"
+
+    return "需继续解析", "缺少正文级摘录、OCR 或足够简介；不应进入前台阅读推送。"
+
+
 def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tuple[str, str]:
     info = info or {}
     platform = guess_platform(url, info)
@@ -4351,6 +4414,19 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         parse_status = "已解析"
     if youtube_subtitle and info:
         parse_status = "已解析"
+    content_quality, quality_gate = assess_content_quality(
+        platform=platform,
+        material_type=material_type,
+        parse_status=parse_status,
+        description=description,
+        platform_meta=platform_meta,
+        content_extract=content_extract,
+        content_extract_error=content_extract_error,
+        image_ocr=image_ocr,
+        image_ocr_error=image_ocr_error,
+        youtube_subtitle=youtube_subtitle,
+        external_transcript=external_transcript,
+    )
 
     filename = sanitize_filename_part(f"{now_date()} {platform} - {title}") + ".md"
     body = [
@@ -4375,6 +4451,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         yaml_field("解析工具", parse_tool),
         yaml_field("解析器", extractor),
         yaml_field("解析状态", parse_status),
+        yaml_field("内容质量", content_quality),
+        yaml_field("质量门禁", quality_gate),
         yaml_field("外部转录链接", external_transcript_url or (external_transcript or {}).get("url", "")),
         yaml_field("外部转录来源", (external_transcript or {}).get("source", "")),
         yaml_field("字幕来源", (youtube_subtitle or {}).get("source", "")),
@@ -4409,7 +4487,12 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         f"- 内容编号：{content_id or '未知'}",
         f"- 缩略图：{thumbnail or '无'}",
         f"- 解析状态：{parse_status}",
+        f"- 内容质量：{content_quality}",
+        f"- 质量门禁：{quality_gate}",
     ]
+
+    if content_quality != "可推送":
+        body.extend(["", "## 质量门禁", "", quality_gate])
 
     if parse_notice:
         body.extend(["", "## 解析说明", "", parse_notice.strip()])
