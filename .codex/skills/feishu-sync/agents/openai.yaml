@@ -1,0 +1,6 @@
+interface:
+  display_name: "飞书精选同步"
+  short_description: "把本地精选 Markdown 同步到飞书知识库"
+  default_prompt: "Use $feishu-sync to sync selected my-mind Markdown notes into the Feishu knowledge base without creating duplicates."
+policy:
+  allow_implicit_invocation: true
