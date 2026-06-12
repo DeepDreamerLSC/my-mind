@@ -16,10 +16,15 @@
 外部转录来源: Lex Fridman 官方 transcript
 字幕来源: 
 字幕语言: 
-处理状态: 待分拣
-关联项目: []
-关联领域: []
-主题: []
+处理状态: 已分拣
+关联项目:
+  - 个人数据资产系统
+关联领域:
+  - 人工智能产业
+主题:
+  - NVIDIA
+  - AI scaling laws
+  - 数据中心
 标签:
   - 视频链接
   - YouTube
@@ -150,6 +155,12 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 
 待补充。
 
+## 阅读思考
+
+- 待阅读后补充。
+- 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。
+- 如果和 Codex 交流过，可把交流后的新判断补在这里。
+
 ## 后续处理建议
 
 - 判断是否需要进入资料库。
@@ -159,3 +170,8 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 ## 原始链接
 
 https://youtu.be/vif8NQcjVf0?si=3r2VsWthEdb7RYVQ
+
+## 沉淀记录
+
+- 2026-06-10：已整理为资料库候选：[2026-06-10 Jensen Huang - NVIDIA 与 AI 革命访谈整理](../20_资料库/人工智能产业/2026-06-10%20Jensen%20Huang%20-%20NVIDIA%20与%20AI%20革命访谈整理.md)。
+- 当前只完成资料整理与主题提炼，尚未晋升为长期知识、洞察或项目决策。
