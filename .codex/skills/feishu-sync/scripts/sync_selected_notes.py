@@ -12,6 +12,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,11 @@ DEFAULT_SCAN_DIRS = [
     ROOT / "75_提示词库",
     ROOT / "design",
 ]
+DEFAULT_AUTO_SYNC_DIRS = [
+    ROOT / "20_资料库",
+]
 DEFAULT_STRATEGIES = {"精选同步", "目录页同步"}
+SKIP_STRATEGIES = {"不同步", "禁止同步"}
 BLOCKED_SENSITIVE = {"敏感", "私密", "禁止同步", "不可同步"}
 
 DEFAULT_CREATE_COMMAND = (
@@ -40,7 +45,7 @@ DEFAULT_UPDATE_COMMAND = (
     "--api-version v2 --doc {page_token} --mode overwrite --new-title {title} --markdown @{markdown_file_rel}"
 )
 DEFAULT_SEARCH_COMMAND = (
-    'OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +search --as user --query {title}'
+    'OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +search --as user --query {search_title}'
 )
 
 
@@ -84,6 +89,22 @@ def repo_relative(path: Path) -> str:
         return path.resolve().relative_to(ROOT.resolve()).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def is_under(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def default_strategy_for(path: Path, auto_sync_dirs: list[Path]) -> str:
+    if not any(is_under(path, parent) for parent in auto_sync_dirs):
+        return ""
+    if path.name == "目录说明.md" or path.name.endswith("索引.md"):
+        return "目录页同步"
+    return "精选同步"
 
 
 def read_text(path: Path) -> str:
@@ -152,19 +173,19 @@ def content_hash(title: str, body: str) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def load_note(path: Path) -> Note | None:
+def load_note(path: Path, auto_sync_dirs: list[Path]) -> Note | None:
     text = read_text(path)
     front_matter, body = split_front_matter(text)
-    if not front_matter:
-        return None
-    metadata = parse_front_matter(front_matter)
+    default_strategy = default_strategy_for(path, auto_sync_dirs)
+    metadata = parse_front_matter(front_matter) if front_matter else {}
     raw_sync = metadata.get("飞书同步")
-    if not isinstance(raw_sync, dict):
+    if not isinstance(raw_sync, dict) and not default_strategy:
         return None
-    sync = {str(key): str(value) for key, value in raw_sync.items()}
+    sync = {str(key): str(value) for key, value in raw_sync.items()} if isinstance(raw_sync, dict) else {}
     title = str(metadata.get("标题") or first_heading(body) or path.stem).strip()
-    strategy = sync.get("策略", "").strip()
+    strategy = sync.get("策略", "").strip() or default_strategy
     status = sync.get("状态", "").strip()
+    front_matter = front_matter or f"标题: {title}"
     return Note(
         path=path,
         rel_path=repo_relative(path),
@@ -195,13 +216,16 @@ def discover_notes(
     *,
     scan_dirs: list[Path],
     explicit_files: list[Path],
+    auto_sync_dirs: list[Path],
     strategies: set[str],
     allow_sensitive: bool,
 ) -> list[Note]:
     notes: list[Note] = []
     for path in iter_markdown_files(scan_dirs, explicit_files):
-        note = load_note(path)
+        note = load_note(path, auto_sync_dirs)
         if not note:
+            continue
+        if note.strategy in SKIP_STRATEGIES:
             continue
         if note.strategy not in strategies:
             continue
@@ -276,17 +300,18 @@ def parse_publish_output(output: str, fallback: RemotePage | None = None) -> Rem
             message = str(error.get("message") or "命令返回 ok=false")
             hint = str(error.get("hint") or "").strip()
             raise RuntimeError(f"{message}{'；' + hint if hint else ''}")
-        page = extract_remote_page_from_obj(data)
-        if page.exists():
-            if fallback:
-                page.feishu_url = page.feishu_url or fallback.feishu_url
-                page.page_token = page.page_token or fallback.page_token
-                page.wiki_node_token = page.wiki_node_token or fallback.wiki_node_token
-            return page
+        for obj in walk_json(data):
+            page = extract_remote_page_from_obj(obj)
+            if page.exists():
+                if fallback:
+                    page.feishu_url = page.feishu_url or fallback.feishu_url
+                    page.page_token = page.page_token or fallback.page_token
+                    page.wiki_node_token = page.wiki_node_token or fallback.wiki_node_token
+                return page
     url_match = re.search(r"https?://\S+", output)
     token_match = re.search(r"\b([A-Za-z0-9]{16,})\b", output)
     page = RemotePage(
-        feishu_url=url_match.group(0).rstrip("。,;；)") if url_match else "",
+        feishu_url=url_match.group(0).rstrip("\"'。,;；)") if url_match else "",
         page_token=token_match.group(1) if token_match else "",
     )
     if fallback:
@@ -300,15 +325,24 @@ def normalize_title(title: str) -> str:
     return re.sub(r"\s+", " ", title).strip().lower()
 
 
-def search_existing_page(note: Note, search_command: str) -> RemotePage | None:
+def short_search_title(title: str) -> str:
+    return title.strip()[:30]
+
+
+def search_existing_page(note: Note, search_command: str, delay_seconds: float, retries: int) -> RemotePage | None:
     replacements = command_replacements(note, Path(""), RemotePage())
-    completed = subprocess.run(
-        search_command.format(**replacements),
-        shell=True,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    command = search_command.format(**replacements)
+    if delay_seconds > 0:
+        time.sleep(delay_seconds)
+    completed = None
+    for attempt in range(max(1, retries + 1)):
+        completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
+        combined = "\n".join(part for part in [completed.stdout.strip(), completed.stderr.strip()] if part)
+        if completed.returncode == 0 or "too many request" not in combined:
+            break
+        if attempt < retries:
+            time.sleep(max(delay_seconds, 1.0) * (attempt + 1))
+    assert completed is not None
     combined_output = "\n".join(part for part in [completed.stdout.strip(), completed.stderr.strip()] if part)
     if completed.returncode != 0:
         raise RuntimeError(f"飞书搜索失败，退出码 {completed.returncode}：{combined_output}")
@@ -375,6 +409,11 @@ def remote_from_note(note: Note, records: dict[str, RemotePage]) -> RemotePage:
     )
     record_page = records.get(note.rel_path, RemotePage())
     if frontmatter_page.exists():
+        if record_page.exists():
+            frontmatter_page.feishu_url = frontmatter_page.feishu_url or record_page.feishu_url
+            frontmatter_page.page_token = frontmatter_page.page_token or record_page.page_token
+            frontmatter_page.wiki_node_token = frontmatter_page.wiki_node_token or record_page.wiki_node_token
+            frontmatter_page.content_hash = frontmatter_page.content_hash or record_page.content_hash
         return frontmatter_page
     if record_page.exists():
         record_page.source = "record"
@@ -434,6 +473,7 @@ def command_replacements(note: Note, markdown_file: Path, remote: RemotePage) ->
         "markdown_file": shlex.quote(markdown_file_abs),
         "markdown_file_rel": shlex.quote(markdown_file_rel),
         "content_hash": shlex.quote(note.digest),
+        "search_title": shlex.quote(short_search_title(note.title)),
         "feishu_url": shlex.quote(remote.feishu_url),
         "page_token": shlex.quote(remote.page_token),
         "wiki_node_token": shlex.quote(remote.wiki_node_token),
@@ -612,7 +652,7 @@ def build_record(
 
 def print_plan(notes: list[Note], records: dict[str, RemotePage], force: bool) -> None:
     if not notes:
-        print("没有找到带 `飞书同步` 且需要同步的候选文档。")
+        print("没有找到需要同步的候选文档。")
         return
     rows = []
     for note in notes:
@@ -647,7 +687,7 @@ def process_note(
 
     if action == "创建":
         if args.search_before_create:
-            found = search_existing_page(note, args.search_command)
+            found = search_existing_page(note, args.search_command, args.search_delay_seconds, args.search_retries)
             if found:
                 remote = found
                 action = "认领更新"
@@ -704,6 +744,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scan-dir", action="append", default=[], help="Directory to scan. Can be repeated. Defaults to curated my-mind dirs.")
     parser.add_argument("--file", action="append", default=[], help="Explicit Markdown file to consider. Can be repeated.")
     parser.add_argument("--strategy", action="append", default=[], help="Allowed 飞书同步.策略 value. Defaults to 精选同步 and 目录页同步.")
+    parser.add_argument("--no-default-library-sync", dest="default_library_sync", action="store_false", default=True, help="Do not treat unmarked 20_资料库 Markdown files as sync candidates.")
     parser.add_argument("--record-file", type=Path, default=DEFAULT_RECORD_FILE)
     parser.add_argument("--draft-dir", type=Path, default=DEFAULT_DRAFT_DIR)
     parser.add_argument("--create-command", default=os.environ.get("MY_MIND_FEISHU_SYNC_CREATE_COMMAND", DEFAULT_CREATE_COMMAND))
@@ -717,6 +758,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--force", action="store_true", help="Update even when content hash is unchanged.")
     parser.add_argument("--allow-sensitive", action="store_true", help="Allow notes marked with sensitive statuses.")
     parser.add_argument("--no-search-before-create", dest="search_before_create", action="store_false", default=True)
+    parser.add_argument("--search-delay-seconds", type=float, default=float(os.environ.get("MY_MIND_FEISHU_SYNC_SEARCH_DELAY_SECONDS", "0.8")), help="Delay before each Feishu search to reduce rate limiting.")
+    parser.add_argument("--search-retries", type=int, default=int(os.environ.get("MY_MIND_FEISHU_SYNC_SEARCH_RETRIES", "3")), help="Retry count for Feishu search rate limits.")
     parser.add_argument("--allow-create-without-search", action="store_true")
     parser.add_argument("--no-write-back", dest="write_back", action="store_false", default=True)
     parser.add_argument("--record-skips", action="store_true", help="Append JSONL records for unchanged skipped notes.")
@@ -732,11 +775,13 @@ def main() -> int:
     scan_dirs = [Path(path) for path in args.scan_dir] if args.scan_dir else DEFAULT_SCAN_DIRS
     scan_dirs = [path if path.is_absolute() else ROOT / path for path in scan_dirs]
     explicit_files = [Path(path) if Path(path).is_absolute() else ROOT / path for path in args.file]
+    auto_sync_dirs = DEFAULT_AUTO_SYNC_DIRS if args.default_library_sync else []
     strategies = set(args.strategy) if args.strategy else DEFAULT_STRATEGIES
 
     notes = discover_notes(
         scan_dirs=scan_dirs,
         explicit_files=explicit_files,
+        auto_sync_dirs=auto_sync_dirs,
         strategies=strategies,
         allow_sensitive=args.allow_sensitive,
     )
@@ -777,7 +822,7 @@ def main() -> int:
             print(f"失败 {note.rel_path}: {error}", file=sys.stderr)
 
     if not notes:
-        print("没有找到带 `飞书同步` 且需要同步的候选文档。")
+        print("没有找到需要同步的候选文档。")
     return 1 if failures else 0
 
 

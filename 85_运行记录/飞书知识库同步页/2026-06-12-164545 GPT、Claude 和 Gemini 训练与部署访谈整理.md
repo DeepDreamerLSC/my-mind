@@ -1,41 +1,16 @@
----
-类别: 资料
-处理状态: 已处理
-可信状态: 待核验
-标题: GPT、Claude 和 Gemini 训练与部署访谈整理
-资料来源: 飞书知识库 / YouTube Summarizer / Dwarkesh Patel
-资料时间: 2026-04-29
-捕获时间: 2026-06-12
-关联项目:
-  - 个人数据资产系统
-关联领域:
-  - 人工智能产业
-  - AI基础设施
-主题:
-  - 模型推理
-  - 模型训练
-  - KV缓存
-  - 批处理
-  - AI基础设施成本
-标签:
-  - 资料
-  - YouTube
-  - AI基础设施
-  - 待核验
-需要人工确认: 是
-敏感状态: 未知
-飞书来源节点: BH8jwE8jmiMLvxkPJkKcmxNInmg
-飞书同步:
-  策略: "精选同步"
-  状态: "已同步"
-  飞书页面: "https://my.feishu.cn/docx/AATSdCnNkozWBFxsIOXc8gbFn0e"
-  页面Token: "AATSdCnNkozWBFxsIOXc8gbFn0e"
-  Wiki节点: "AV2TwTQ5GiF7zZk1CuJcx0zKnwc"
-  最近同步: "2026-06-12 16:49:10 +0800"
-  内容哈希: "d4fbab8cf4078dd901c81eb01e7363d804e148ecb49c8aad4b584be3c6e80e45"
-  最近错误: ""
----
 # GPT、Claude 和 Gemini 训练与部署访谈整理
+
+> 本页由本地 my-mind 知识库精选同步生成；本地 Markdown 是唯一可信源。
+
+## 同步信息
+
+- 本地路径：`20_资料库/人工智能产业/2026-06-12 GPT Claude Gemini 训练与部署访谈整理.md`
+- 同步策略：精选同步
+- 处理状态：已处理
+- 可信状态：待核验
+- 同步时间：2026-06-12 16:45:45 +0800
+
+---
 
 ## 资料背景
 

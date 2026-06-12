@@ -1,11 +1,11 @@
 ---
 name: feishu-sync
-description: Sync selected my-mind Markdown notes into Feishu/Lark knowledge base pages without creating duplicates. Use when the user asks to 同步本地知识库到飞书, 飞书精选同步, sync selected notes to Feishu, maintain Feishu directory mirrors, or publish curated 20_资料库/10_项目/75_提示词库 pages. Scans explicit 飞书同步 front matter, writes 85_运行记录/飞书知识库同步记录.jsonl, and avoids duplicate documents by reusing local metadata, prior sync records, and Feishu search before creation.
+description: Sync selected my-mind Markdown notes into Feishu/Lark knowledge base pages without creating duplicates. Use when the user asks to 同步本地知识库到飞书, 飞书精选同步, sync selected notes to Feishu, maintain Feishu directory mirrors, or publish curated 20_资料库/10_项目/75_提示词库 pages. Treats 20_资料库 as default sync candidates unless explicitly disabled, scans 飞书同步 front matter, writes 85_运行记录/飞书知识库同步记录.jsonl, and avoids duplicate documents by reusing local metadata, prior sync records, and Feishu search before creation.
 ---
 
 # 飞书精选同步
 
-把本地已经标记为精选的 Markdown 同步到飞书知识库。这个 skill 只处理长期精选内容；每日待读仍使用 `feishu-publish`。
+把本地精选 Markdown 同步到飞书知识库。当前阶段 `20_资料库` 默认纳入飞书精选同步；其他目录仍需要显式 `飞书同步` 标记。这个 skill 只处理长期精选内容；每日待读仍使用 `feishu-publish`。
 
 ## 快速使用
 
@@ -58,7 +58,7 @@ python3 .codex/skills/feishu-sync/scripts/sync_selected_notes.py --publish
 
 ## 本地标记
 
-只有带显式 `飞书同步` front matter 的文档会被扫描为候选：
+`20_资料库` 下的 Markdown 默认会被扫描为候选。其他目录只有带显式 `飞书同步` front matter 的文档会被扫描为候选：
 
 ```yaml
 飞书同步:
@@ -76,7 +76,7 @@ python3 .codex/skills/feishu-sync/scripts/sync_selected_notes.py --publish
 - `精选同步`
 - `目录页同步`
 
-`策略: 不同步` 或 `状态: 暂停` 会跳过。
+`策略: 不同步`、`策略: 禁止同步` 或 `状态: 暂停` 会跳过。需要临时关闭资料库默认同步时，运行时加 `--no-default-library-sync`。
 
 ## 防重复规则
 
@@ -85,6 +85,7 @@ python3 .codex/skills/feishu-sync/scripts/sync_selected_notes.py --publish
 - 如果 front matter 里已有 `飞书页面` 或 `页面Token`，只更新该页面。
 - 如果 `85_运行记录/飞书知识库同步记录.jsonl` 里已有同一 `source_file` 的页面记录，只复用该页面。
 - 如果本地没有记录，创建前会用飞书搜索同标题文档；命中唯一精确标题时认领并更新该页面。
+- 飞书搜索词会自动截断到 30 字，并在限流时重试，避免因为标题过长或瞬时限流误创建重复页。
 - 如果搜索失败或命中多个同名文档，默认停止创建并记录错误；需要强行创建必须显式加 `--allow-create-without-search`。
 - 如果内容哈希未变化，默认跳过，不创建也不更新。
 
@@ -101,7 +102,7 @@ python3 .codex/skills/feishu-sync/scripts/sync_selected_notes.py --publish
 
 ## 工作边界
 
-- 只同步显式标记的精选文档。
+- 默认同步 `20_资料库`，并同步其他显式标记的精选文档。
 - 不扫描 `00_收件箱/` 和 `05_流转区/` 作为长期精选来源。
 - 不保存飞书凭证、space id 或目录 node token 到仓库文件。
 - 不把飞书侧编辑回写到本地正文。

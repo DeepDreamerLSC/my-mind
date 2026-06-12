@@ -1,40 +1,16 @@
----
-类别: 资料
-处理状态: 已处理
-可信状态: 原始
-标题: Jensen Huang - NVIDIA 与 AI 革命访谈整理
-资料来源: YouTube / Lex Fridman transcript
-资料时间: 2026-03-23
-捕获时间: 2026-06-10
-关联项目:
-  - 个人数据资产系统
-关联领域:
-  - 人工智能产业
-  - 计算基础设施
-主题:
-  - NVIDIA
-  - AI scaling laws
-  - 供应链
-  - 数据中心
-  - CUDA
-标签:
-  - 资料
-  - 访谈
-  - YouTube
-  - Lex Fridman
-需要人工确认: 是
-敏感状态: 未知
-飞书同步:
-  策略: "精选同步"
-  状态: "已同步"
-  飞书页面: "https://my.feishu.cn/docx/O7RLduJTBoYlwIx6HBQct1NNn7B"
-  页面Token: "O7RLduJTBoYlwIx6HBQct1NNn7B"
-  Wiki节点: "NbUswkjrYiDsx1k2aqUcs2xonug"
-  最近同步: "2026-06-12 16:49:10 +0800"
-  内容哈希: "c877d33bdb30612488893e5209d5e1c990cd31f012ab4f9708c56bbf1362590f"
-  最近错误: ""
----
 # Jensen Huang - NVIDIA 与 AI 革命访谈整理
+
+> 本页由本地 my-mind 知识库精选同步生成；本地 Markdown 是唯一可信源。
+
+## 同步信息
+
+- 本地路径：`20_资料库/人工智能产业/2026-06-10 Jensen Huang - NVIDIA 与 AI 革命访谈整理.md`
+- 同步策略：精选同步
+- 处理状态：已处理
+- 可信状态：原始
+- 同步时间：2026-06-12 16:49:01 +0800
+
+---
 
 ## 资料背景
 
