@@ -217,7 +217,8 @@ def build_prompt_candidate(note: InboxNote) -> tuple[str, str]:
     copy = extract_section(note.body, "文案摘录")
     summary = extract_section(note.body, "摘要")
     key_points = extract_section(note.body, "关键点")
-    source_text = "\n\n".join(part for part in [copy, summary, key_points] if part).strip() or note.body[:1800]
+    reading_notes = extract_section(note.body, "阅读思考")
+    source_text = "\n\n".join(part for part in [copy, summary, key_points, reading_notes] if part).strip() or note.body[:1800]
     title = sanitize_filename_part(note.title)
     purpose = infer_prompt_purpose(note, source_text)
     scenarios = infer_scenarios(source_text)
@@ -233,14 +234,18 @@ def build_prompt_candidate(note: InboxNote) -> tuple[str, str]:
     content = [
         f"# {title}",
         "",
-        "## 用途",
-        "",
-        purpose,
-        "",
-        "## 来源",
-        "",
-        f"- 来源资料：`{source_rel}`",
-        f"- 来源平台：{note.platform}",
+            "## 用途",
+            "",
+            purpose,
+            "",
+            "## 用户阅读思考",
+            "",
+            reading_notes or "待补充。用户阅读并与 Codex 交流后，可把思考回写到来源笔记的“阅读思考”章节。",
+            "",
+            "## 来源",
+            "",
+            f"- 来源资料：`{source_rel}`",
+            f"- 来源平台：{note.platform}",
         f"- 作者：{note.author}",
         f"- 来源链接：{source_url or '未知'}",
         f"- 整理时间：{today}",
@@ -350,7 +355,7 @@ def build_updated_source(note: InboxNote, target_path: Path, target_title: str) 
     lines = note.raw_text.splitlines()
     if not lines or lines[0] != "---":
         raise ValueError("来源笔记缺少 frontmatter，暂不自动回写。")
-    lines = set_scalar_field(lines, "处理状态", "已分拣")
+    lines = set_scalar_field(lines, "处理状态", "已处理")
     projects = merge_unique(existing_list(note.frontmatter, "关联项目"), [PROJECT_NAME])
     topics = merge_unique(existing_list(note.frontmatter, "主题"), ["Codex", "提示词", "工作流"])
     lines = set_list_field(lines, "关联项目", projects)
@@ -359,7 +364,7 @@ def build_updated_source(note: InboxNote, target_path: Path, target_title: str) 
 
     today = dt.datetime.now(TZ).strftime("%Y-%m-%d")
     link = relative_link(note.path, target_path)
-    record = f"- {today}：已整理为候选提示词：[{target_title}]({link})。状态：候选，尚未确认长期知识或项目决策。"
+    record = f"- {today}：已根据用户确认继续沉淀，整理为候选提示词：[{target_title}]({link})。状态：候选，尚未确认长期知识或项目决策。"
     if record in updated:
         return updated
     if "## 沉淀记录" in updated:

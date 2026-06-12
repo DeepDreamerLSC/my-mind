@@ -7,6 +7,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo("Asia/Shanghai")
@@ -85,6 +86,9 @@ class TriageResult:
     score: int
 
 
+READING_FEEDBACK_PROMPT = "阅读后请反馈：你认同/不认同的点、与已有知识的连接、想沉淀到哪里、以及是否现在开始沉淀；也可以让我把这些反馈写回“阅读思考”章节。"
+
+
 def clean_scalar(value: str) -> str:
     value = value.strip()
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
@@ -129,6 +133,17 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     return data, body
 
 
+def extract_section(body: str, heading: str) -> str:
+    pattern = re.compile(rf"^##+\s+{re.escape(heading)}\s*$", re.MULTILINE)
+    match = pattern.search(body)
+    if not match:
+        return ""
+    start = match.end()
+    next_match = re.search(r"^##\s+", body[start:], flags=re.MULTILINE)
+    end = start + next_match.start() if next_match else len(body)
+    return body[start:end].strip()
+
+
 def load_notes(inbox: Path, include_all: bool = False) -> list[InboxNote]:
     notes: list[InboxNote] = []
     for path in sorted(inbox.glob("*.md")):
@@ -142,9 +157,123 @@ def load_notes(inbox: Path, include_all: bool = False) -> list[InboxNote]:
     return notes
 
 
+def load_notes_by_status(inbox: Path, statuses: set[str]) -> list[InboxNote]:
+    return [note for note in load_notes(inbox, include_all=True) if note.status in statuses]
+
+
 def has_any(text: str, keywords: set[str]) -> bool:
     lowered = text.lower()
     return any(keyword.lower() in lowered for keyword in keywords)
+
+
+def strip_management_sections(body: str) -> str:
+    management_headings = [
+        "为什么保存",
+        "初步想法",
+        "阅读思考",
+        "后续处理建议",
+        "分拣记录",
+        "沉淀记录",
+        "原始链接",
+    ]
+    cleaned = body
+    for heading in management_headings:
+        pattern = re.compile(rf"\n##\s+{re.escape(heading)}\s*\n.*?(?=\n##\s+|\Z)", re.DOTALL)
+        cleaned = pattern.sub("\n", cleaned)
+    return cleaned.strip()
+
+
+def normalize_feedback_text(text: str) -> str:
+    cleaned_lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.startswith(("-", "*")):
+            line = line[1:].strip()
+        if not line:
+            continue
+        if line.startswith("可记录："):
+            continue
+        if line in {"待补充。", "待补充", "暂无。", "暂无"}:
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines).strip()
+
+
+def has_meaningful_reading_feedback(note: InboxNote) -> bool:
+    reading_notes = extract_section(note.body, "阅读思考")
+    return bool(normalize_feedback_text(reading_notes))
+
+
+def repo_relative_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+def classify_candidate_target(path_text: str) -> str:
+    if path_text.startswith("75_提示词库/"):
+        return PROMPT_DESTINATION
+    if path_text.startswith("20_资料库/"):
+        return KNOWLEDGE_DESTINATION
+    if path_text.startswith("30_原子笔记/"):
+        return ATOMIC_DESTINATION
+    if path_text.startswith("10_项目/"):
+        return PROJECT_DESTINATION
+    if path_text.startswith("60_行业情报/"):
+        return SIGNAL_DESTINATION
+    if path_text.startswith("65_洞察/"):
+        return INSIGHT_DESTINATION
+    return "其他候选"
+
+
+def extract_candidate_targets(note: InboxNote) -> list[tuple[str, str]]:
+    record = extract_section(note.body, "沉淀记录")
+    if not record:
+        return []
+
+    entries: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for _, raw_link in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", record):
+        link = unquote(raw_link.strip())
+        if not link or "://" in link:
+            continue
+        target = (note.path.parent / link).resolve()
+        rel = repo_relative_path(target)
+        if rel in seen:
+            continue
+        seen.add(rel)
+        entries.append((rel, classify_candidate_target(rel)))
+    return entries
+
+
+def summarize_pending_stage(note: InboxNote) -> tuple[str, list[str], str]:
+    candidate_targets = extract_candidate_targets(note)
+    candidate_paths = [path for path, _ in candidate_targets]
+    candidate_types = [candidate_type for _, candidate_type in candidate_targets]
+    has_feedback = has_meaningful_reading_feedback(note)
+
+    if candidate_targets:
+        phase = "已有候选待确认"
+    elif has_feedback:
+        phase = "已阅读待生成候选"
+    else:
+        phase = "等待阅读反馈"
+
+    if PROMPT_DESTINATION in candidate_types:
+        strategy = "保持提示词候选，不直接视为正式方法论；先在真实任务里试跑 1 到 2 次，确认高频复用后再考虑升级到项目流程或 `.codex/skills/`。"
+    elif KNOWLEDGE_DESTINATION in candidate_types and INSIGHT_DESTINATION in candidate_types:
+        strategy = "保持资料候选，先抽出关键事实、观察问题和可验证判断；只有形成跨来源结论后，再考虑升级到洞察或原子笔记。"
+    elif KNOWLEDGE_DESTINATION in candidate_types:
+        strategy = "保持资料整理稿，不直接晋升长期知识；先补关键事实核验，再决定是否提炼成原子笔记或行业情报。"
+    elif phase == "已阅读待生成候选":
+        strategy = "已具备继续沉淀条件；先根据阅读思考选择一个主目标目录生成候选草稿，再决定是否需要扩展到项目任务或提示词库。"
+    elif PROMPT_DESTINATION in candidate_types or PROJECT_DESTINATION in candidate_types:
+        strategy = "先保留为工作流候选，再用一次真实任务验证是否真能减少重复劳动。"
+    else:
+        strategy = "先阅读并把判断写回“阅读思考”，暂不直接沉淀；确认继续后，只生成候选草稿，不自动确认长期知识。"
+
+    return phase, candidate_paths, strategy
 
 
 def is_prompt_material(text: str) -> bool:
@@ -219,13 +348,14 @@ def collect_risks(note: InboxNote) -> list[str]:
 def triage_note(note: InboxNote) -> TriageResult:
     tags = note.frontmatter.get("标签") or []
     tag_text = " ".join(tags) if isinstance(tags, list) else str(tags)
+    source_body = strip_management_sections(note.body)
     text = "\n".join(
         [
             note.title,
             note.platform,
             str(note.frontmatter.get("作者或频道") or ""),
             tag_text,
-            note.body[:4000],
+            source_body[:4000],
         ]
     )
 
@@ -275,11 +405,37 @@ def triage_note(note: InboxNote) -> TriageResult:
     return TriageResult(note, priority, deduped, value, next_step, risks, score)
 
 
-def render_report(results: list[TriageResult], inbox: Path) -> str:
+def render_result_block(result: TriageResult, index: int, include_reading_feedback: bool = False) -> list[str]:
+    note = result.note
+    lines = [
+        "",
+        f"### {index}. {note.title}",
+        "",
+        f"- 优先级：{result.priority}",
+        f"- 建议去向：{'、'.join(result.destinations)}",
+        f"- 核心价值：{result.value}",
+        f"- 下一步：{result.next_step}",
+        f"- 来源平台：{note.platform or '未知'}",
+        f"- 解析状态：{note.frontmatter.get('解析状态') or '未知'}",
+        f"- 来源文件：`{note.path}`",
+    ]
+    if include_reading_feedback:
+        phase, candidate_paths, strategy = summarize_pending_stage(note)
+        lines.append(f"- 当前阶段：{phase}")
+        lines.append(f"- 已有候选：{'、'.join(f'`{path}`' for path in candidate_paths) if candidate_paths else '暂无'}")
+        lines.append(f"- 建议处理策略：{strategy}")
+        lines.append(f"- 阅读后反馈：{READING_FEEDBACK_PROMPT}")
+    lines.append("- 风险：")
+    lines.extend(f"  - {risk}" for risk in result.risks)
+    return lines
+
+
+def render_report(results: list[TriageResult], reading_queue: list[TriageResult], inbox: Path, mark_sorted: bool = False) -> str:
     now = dt.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S %z")
     counts = {"高": 0, "中": 0, "低": 0}
     for result in results:
         counts[result.priority] += 1
+    write_strategy = "自动分拣可回写已分拣状态和分拣记录，但不会生成沉淀草稿。" if mark_sorted else "只生成建议，不修改收件箱源文件。"
 
     lines = [
         "# 收件箱分拣巡检",
@@ -292,36 +448,128 @@ def render_report(results: list[TriageResult], inbox: Path) -> str:
         f"- 高优先级：{counts['高']}",
         f"- 中优先级：{counts['中']}",
         f"- 低优先级：{counts['低']}",
-        "- 写入策略：只生成建议，不修改收件箱源文件。",
+        f"- 待沉淀数量：{len(reading_queue)}",
+        f"- 写入策略：{write_strategy}",
         "",
-        "## 建议清单",
+        "## 待分拣建议",
     ]
 
     if not results:
         lines.extend(["", "当前没有待分拣条目。"])
+    else:
+        priority_order = {"高": 0, "中": 1, "低": 2}
+        ordered = sorted(results, key=lambda item: (priority_order[item.priority], -item.score, item.note.title))
+        for index, result in enumerate(ordered, start=1):
+            lines.extend(render_result_block(result, index))
+
+    lines.extend(["", "## 待沉淀队列"])
+    if not reading_queue:
+        lines.extend(["", "当前没有等待用户阅读反馈或后续确认的待沉淀条目。"])
         return "\n".join(lines).rstrip() + "\n"
 
     priority_order = {"高": 0, "中": 1, "低": 2}
-    ordered = sorted(results, key=lambda item: (priority_order[item.priority], -item.score, item.note.title))
-    for index, result in enumerate(ordered, start=1):
-        note = result.note
-        lines.extend(
-            [
-                "",
-                f"### {index}. {note.title}",
-                "",
-                f"- 优先级：{result.priority}",
-                f"- 建议去向：{'、'.join(result.destinations)}",
-                f"- 核心价值：{result.value}",
-                f"- 下一步：{result.next_step}",
-                f"- 来源平台：{note.platform or '未知'}",
-                f"- 解析状态：{note.frontmatter.get('解析状态') or '未知'}",
-                f"- 来源文件：`{note.path}`",
-                "- 风险：",
-            ]
-        )
-        lines.extend(f"  - {risk}" for risk in result.risks)
+    ordered_queue = sorted(reading_queue, key=lambda item: (priority_order[item.priority], -item.score, item.note.title))
+    for index, result in enumerate(ordered_queue, start=1):
+        lines.extend(render_result_block(result, index, include_reading_feedback=True))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def yaml_scalar(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    text = str(value).replace("\r", " ").replace("\n", " ").strip()
+    if any(ch in text for ch in [":", "#", "[", "]", "{", "}", ",", "\"", "'"]) or text.startswith(("-", "@", "`")):
+        import json
+
+        return json.dumps(text, ensure_ascii=False)
+    return text
+
+
+def set_scalar_field(lines: list[str], key: str, value: str) -> list[str]:
+    prefix = f"{key}:"
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            lines[index] = f"{key}: {value}"
+            return lines
+    insert_at = 1
+    for index, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            insert_at = index
+            break
+    lines.insert(insert_at, f"{key}: {value}")
+    return lines
+
+
+def existing_list(frontmatter: dict[str, Any], key: str) -> list[str]:
+    value = frontmatter.get(key)
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip() not in {"", "[]"}]
+    if value:
+        if str(value).strip() == "[]":
+            return []
+        return [str(value)]
+    return []
+
+
+def set_list_field(lines: list[str], key: str, values: list[str]) -> list[str]:
+    prefix = f"{key}:"
+    start = None
+    for index, line in enumerate(lines):
+        if line.startswith(prefix):
+            start = index
+            break
+    rendered = [f"{key}:"] + [f"  - {yaml_scalar(value)}" for value in values]
+    if start is None:
+        insert_at = 1
+        for index, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                insert_at = index
+                break
+        return lines[:insert_at] + rendered + lines[insert_at:]
+
+    end = start + 1
+    while end < len(lines) and lines[end].startswith("  - "):
+        end += 1
+    return lines[:start] + rendered + lines[end:]
+
+
+def merge_unique(values: list[str], additions: list[str]) -> list[str]:
+    result = list(values)
+    for item in additions:
+        if item and item not in result:
+            result.append(item)
+    return result
+
+
+def build_sorted_source(note: InboxNote, result: TriageResult) -> str:
+    lines = note.path.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "---":
+        raise ValueError(f"来源笔记缺少 frontmatter：{note.path}")
+    lines = set_scalar_field(lines, "处理状态", "已分拣")
+    if PROJECT_DESTINATION in result.destinations:
+        projects = merge_unique(existing_list(note.frontmatter, "关联项目"), ["个人数据资产系统"])
+        lines = set_list_field(lines, "关联项目", projects)
+    updated = "\n".join(lines).rstrip() + "\n"
+
+    today = dt.datetime.now(TZ).strftime("%Y-%m-%d")
+    summary = f"- {today}：已自动分拣。建议去向：{'、'.join(result.destinations)}。核心价值：{result.value}。下一步：先阅读原文，再在对话中反馈是否继续沉淀。"
+    if summary in updated:
+        return updated
+    if "## 分拣记录" in updated:
+        updated = re.sub(r"(## 分拣记录\n\n)", rf"\1{summary}\n", updated, count=1)
+    elif "## 沉淀记录" in updated:
+        updated = updated.replace("## 沉淀记录", f"## 分拣记录\n\n{summary}\n\n## 沉淀记录", 1)
+    elif "## 原始链接" in updated:
+        updated = updated.replace("## 原始链接", f"## 分拣记录\n\n{summary}\n\n## 原始链接", 1)
+    else:
+        updated = updated.rstrip() + f"\n\n## 分拣记录\n\n{summary}\n"
+    return updated.rstrip() + "\n"
+
+
+def write_back_sorted(results: list[TriageResult]) -> None:
+    for result in results:
+        updated = build_sorted_source(result.note, result)
+        result.note.path.write_text(updated, encoding="utf-8")
 
 
 def write_report(report: str, report_dir: Path) -> Path:
@@ -337,17 +585,37 @@ def main() -> int:
     parser.add_argument("--inbox", default="00_收件箱", help="Inbox directory to scan.")
     parser.add_argument("--all", action="store_true", help="Include notes that are not marked 待分拣.")
     parser.add_argument("--write", action="store_true", help="Write the report to --report-dir.")
-    parser.add_argument("--report-dir", default="85_指标", help="Directory for written reports.")
+    parser.add_argument("--mark-sorted", action="store_true", help="Mark current 待分拣 notes as 已分拣 and append 分拣记录.")
+    parser.add_argument("--report-dir", default="85_运行记录", help="Directory for written reports.")
     args = parser.parse_args()
 
     inbox = Path(args.inbox)
-    notes = load_notes(inbox, include_all=args.all)
+    if args.mark_sorted:
+        notes = load_notes_by_status(inbox, {"待分拣"})
+    elif args.all:
+        notes = load_notes(inbox, include_all=True)
+    else:
+        notes = load_notes_by_status(inbox, {"待分拣"})
     results = [triage_note(note) for note in notes]
-    report = render_report(results, inbox)
+    if args.mark_sorted and results:
+        write_back_sorted(results)
+        reading_notes = load_notes_by_status(inbox, {"已分拣"})
+    else:
+        reading_notes = load_notes_by_status(inbox, {"已分拣"})
+        if args.mark_sorted:
+            pending_paths = {result.note.path for result in results}
+            existing_paths = {note.path for note in reading_notes}
+            for result in results:
+                if result.note.path in pending_paths and result.note.path not in existing_paths:
+                    reading_notes.append(result.note)
+    reading_queue = [triage_note(note) for note in reading_notes]
+    report = render_report(results, reading_queue, inbox, mark_sorted=args.mark_sorted)
     print(report, end="")
     if args.write:
         path = write_report(report, Path(args.report_dir))
         print(f"\n已写入：{path}")
+    if args.mark_sorted and results:
+        print(f"\n已自动分拣：{len(results)} 条")
     return 0
 
 
