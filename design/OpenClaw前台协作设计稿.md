@@ -82,12 +82,13 @@ OpenClaw 是 `my-mind` 的前台交互层，负责把资料、提醒和反馈带
 
 ```text
 85_运行记录/前台推送-*.md
+85_运行记录/飞书发布记录.jsonl
 85_运行记录/收件箱分拣巡检-*.md
 05_流转区/
 00_收件箱/*.md
 ```
 
-OpenClaw 应优先读取 `05_流转区/` 和最新前台推送；读取 `00_收件箱/` 只用于向用户展示路径、标题、解析状态和摘要，不用于自动改写。
+OpenClaw 应优先读取 `飞书发布记录.jsonl` 中最新可用飞书链接，其次读取 `05_流转区/` 和最新前台推送；读取 `00_收件箱/` 只用于向用户展示路径、标题、解析状态和摘要，不用于自动改写。
 
 ### Codex 可写
 
@@ -179,7 +180,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-ru
 - `1 继续解析`
 ```
 
-前台推送文件本身应具备手机阅读价值，可以包含较完整的摘录、阅读重点、质量提醒和原文跳转链接；OpenClaw 直接发给用户的聊天消息必须短，优先只发送 1 到 3 条标题、飞书链接和可回复指令。
+前台推送文件本身应具备手机阅读价值，可以包含较完整的摘录、阅读重点、质量提醒和原文跳转链接；默认可以覆盖全量待读。OpenClaw 直接发给用户的聊天消息必须短，优先发送飞书阅读链接、少量重点标题和可回复指令。
 
 ---
 
@@ -202,9 +203,9 @@ my-mind 手机阅读
 
 适合发布到飞书：
 
-- 每日 1 到 3 条待读资料。
+- 当前全量待读资料。
 - `05_流转区/` 中的待读、待沉淀和待核验精选。
-- `85_运行记录/前台推送-*.md` 的精选版。
+- `85_运行记录/前台推送-*.md` 的手机阅读版。
 - 项目今日最小推进动作。
 - 需要用户确认的候选沉淀。
 - 需要用户判断的解析异常。
@@ -220,20 +221,44 @@ my-mind 手机阅读
 ### 推荐流程
 
 1. Codex 生成 `85_运行记录/前台推送-*.md`。
-2. Codex 使用 `lark-cli` 发布飞书文档或知识库节点。
-3. OpenClaw 把飞书阅读链接推给用户。
-4. 用户在手机飞书里阅读。
-5. 用户回复 OpenClaw：`1 已读：...`、`1 沉淀`、`1 跳过` 或 `1 继续解析`。
-6. OpenClaw 追加写入 `85_运行记录/前台反馈队列.jsonl`。
-7. Codex 消费反馈队列，回写 `阅读思考` 或进入候选沉淀。
+2. Codex 使用 `feishu-publish` 生成飞书阅读页草稿，或通过已配置的飞书 CLI/命令模板发布飞书文档或知识库节点。
+3. Codex 追加 `85_运行记录/飞书发布记录.jsonl`。
+4. OpenClaw 把飞书阅读链接推给用户；没有真实链接时，提示需要先配置飞书发布命令。
+5. 用户在手机飞书里阅读。
+6. 用户回复 OpenClaw：`1 已读：...`、`1 沉淀`、`1 跳过` 或 `1 继续解析`。
+7. OpenClaw 追加写入 `85_运行记录/前台反馈队列.jsonl`。
+8. Codex 消费反馈队列，回写 `阅读思考` 或进入候选沉淀。
 
 ### 可用命令方向
 
-本机已安装 `lark-cli`，后续可用如下方向实现发布：
+已落地 skill：
 
 ```bash
-lark-cli docs +create --api-version v2 --doc-format markdown --content @85_运行记录/前台推送-YYYY-MM-DD-HHMM.md --parent-position my_library
-lark-cli wiki +node-create --title "今日待读" --space-id "<飞书知识库 space id>"
+python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --dry-run
+python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --write-local
+```
+
+真实发布通过命令模板接入，避免把飞书凭证、space id 或租户细节写死到仓库。发布身份必须是用户态，否则 bot 创建的文档可能无法出现在用户手机飞书知识库里。
+
+```bash
+OPENCLAW_HOME="$HOME/.openclaw" lark-cli config strict-mode user
+OPENCLAW_HOME="$HOME/.openclaw" lark-cli config default-as user
+OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
+```
+
+确认 `identity=user` 后再发布：
+
+```bash
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --publish
+```
+
+如果需要出现在具体知识库目录中，Codex 发布后继续执行文档入库移动。第一版用环境变量传入目标空间，不把空间 ID 写死进仓库：
+
+```bash
+export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --publish
 ```
 
 第一版不做飞书到本地的双向同步。飞书页面允许重建，本地 `my-mind` 保持源库地位。

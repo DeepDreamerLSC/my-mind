@@ -463,7 +463,7 @@ def build_push(notes: list[InboxNote], project_dir: Path, limit: int) -> str:
         "## 今天最值得读",
         "",
     ]
-    selected = notes[:limit]
+    selected = notes if limit <= 0 else notes[:limit]
     if not selected:
         lines.append("暂无需要推送的待读或待沉淀条目。")
     for index, note in enumerate(selected, start=1):
@@ -565,7 +565,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--flow-dir", default=str(DEFAULT_FLOW_DIR), help="Flow-zone directory used to prioritize pending reading items.")
     parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR), help="Directory for frontdesk push notes.")
     parser.add_argument("--project-dir", default=str(DEFAULT_PROJECT_DIR), help="Project directory for progress summary.")
-    parser.add_argument("--limit", type=int, default=3, help="Maximum pushed inbox items.")
+    parser.add_argument("--limit", type=int, default=0, help="Maximum pushed inbox items. Use 0 to include all candidates.")
     parser.add_argument("--excerpt-chars", type=int, default=1200, help="Maximum reading excerpt characters per item.")
     parser.add_argument("--ignore-flow", action="store_true", help="Ignore 05_流转区 priority and rank directly from inbox notes.")
     parser.add_argument("--dry-run", action="store_true", help="Print push note instead of writing it.")
@@ -588,7 +588,7 @@ def main() -> int:
         project_dir = ROOT / project_dir
 
     flow_priority = {} if args.ignore_flow else parse_flow_priority(flow_dir)
-    note = build_push(load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority), project_dir, max(args.limit, 1))
+    note = build_push(load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority), project_dir, args.limit)
     if args.dry_run:
         print(note, end="")
         return 0

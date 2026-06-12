@@ -23,7 +23,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-run
 ```
 
-调整推送条数：
+默认推送所有待读候选，适合后续发布成飞书阅读页。限制推送条数：
 
 ```bash
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --limit 5
@@ -51,7 +51,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 
 内容包含：
 
-- 今天最值得读的 3 条以内候选。
+- 今天最值得读的全部候选；只有显式 `--limit N` 时才限制条数。
 - 每条的来源、价值、建议动作、建议沉淀方向和来源文件。
 - 每条的原文链接、原始分享入口和外部转录链接，便于用户跳转到平台继续阅读。
 - 可直接阅读的正文摘录、OCR 摘录或视频摘要。
@@ -65,7 +65,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 - 不修改 `00_收件箱/`。
 - 不写入长期知识目录。
 - 不确认事实、观点、项目决策或沉淀结果。
-- OpenClaw 只需要读取最新 `前台推送-*.md`，把飞书链接或精简摘要推给用户。
+- OpenClaw 优先读取 `飞书发布记录.jsonl` 里的最新飞书链接；没有飞书链接时再读取最新 `前台推送-*.md`，把精简摘要推给用户。
 - 推送优先级来自流转区；流转区缺失时才回退到收件箱评分排序。
 
 ## 设计依据
