@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目进展巡检"
+  short_description: "从 git 和运行记录生成项目进展候选"
+  default_prompt: "Use $project-progress to generate a my-mind project progress report from git commits, working tree changes, and recent run records."
