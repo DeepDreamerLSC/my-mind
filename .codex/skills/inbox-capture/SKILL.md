@@ -5,7 +5,7 @@ description: Capture links or raw snippets into the my-mind inbox as Chinese Mar
 
 # Inbox Capture
 
-Use this skill to turn user-provided links or rough snippets into standardized `00_收件箱/` Markdown notes.
+Use this skill to turn user-provided links or rough snippets into standardized `00_收件箱/` Markdown notes. If the user says `入库`, `保存到知识库`, or `直接沉淀`, use `knowledge-intake` instead; it calls this capture layer first, then continues to triage and candidate knowledge generation.
 
 ## Scope
 

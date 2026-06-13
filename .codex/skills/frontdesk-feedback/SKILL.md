@@ -76,7 +76,7 @@ python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py -
 85_运行记录/反馈消费-YYYY-MM-DD-HHMM.md
 ```
 
-如果用户回复 `沉淀成提示词`，消费脚本会调用 `inbox-distill` 生成候选提示词并回链；其他沉淀类型先只记录待处理，不直接写长期知识。
+如果用户回复 `沉淀成提示词`，消费脚本会调用 `inbox-distill` 生成候选提示词并回链；如果用户明确说“入库”或泛化地要求沉淀为资料/洞察，优先交给 `knowledge-intake` 生成候选资料、候选提示词或候选洞察。所有候选都不直接标记为已晋升。
 
 ## 工作边界
 

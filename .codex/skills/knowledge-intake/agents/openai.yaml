@@ -1,0 +1,4 @@
+interface:
+  display_name: "入库处理"
+  short_description: "保存原始材料并自动推进到候选知识沉淀流程和确认清单生成"
+  default_prompt: "Use $knowledge-intake to save this material into the inbox first, then triage it and generate candidate knowledge artifacts with a short confirmation list."
