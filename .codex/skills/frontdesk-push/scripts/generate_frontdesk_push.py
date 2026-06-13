@@ -39,6 +39,14 @@ HIGH_KEYWORDS = [
 MEDIUM_KEYWORDS = ["人工智能", "ai", "管理", "项目", "知识", "复盘", "资料库", "原子笔记"]
 TERMINAL_STATUSES = {"已处理", "已晋升", "可丢弃", "已归档"}
 LOW_QUALITY_STATUSES = {"需继续解析"}
+PROMOTED_STATUSES = {"正式", "已处理"}
+PROMOTED_ABSORPTION_STATUSES = {"已吸收", "已应用"}
+PROMOTION_ROOTS = [
+    ROOT / "20_资料库",
+    ROOT / "30_原子笔记",
+    ROOT / "65_洞察",
+    ROOT / "75_提示词库",
+]
 
 
 @dataclass
@@ -216,6 +224,40 @@ def split_frontmatter(text: str) -> tuple[dict[str, str], str]:
         key, value = line.split(":", 1)
         meta[key.strip()] = value.strip().strip('"')
     return meta, body
+
+
+def normalize_repo_path(value: str) -> str:
+    text = str(value or "").strip().strip("\"'`")
+    if not text:
+        return ""
+    path = Path(text)
+    if path.is_absolute():
+        try:
+            return path.resolve().relative_to(ROOT.resolve()).as_posix()
+        except ValueError:
+            return path.as_posix()
+    return path.as_posix().lstrip("./")
+
+
+def load_promoted_sources(roots: list[Path]) -> set[str]:
+    sources: set[str] = set()
+    for root in roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.md"):
+            text = read_text(path)
+            meta, _body = split_frontmatter(text)
+            source = normalize_repo_path(meta.get("来源文件", ""))
+            if not source:
+                continue
+            process_status = meta.get("处理状态", "")
+            absorption_status = meta.get("吸收状态", "")
+            promotion_gate = meta.get("转正门禁", "")
+            if process_status in PROMOTED_STATUSES and (
+                absorption_status in PROMOTED_ABSORPTION_STATUSES or promotion_gate == "通过"
+            ):
+                sources.add(source)
+    return sources
 
 
 def first_section(body: str, heading: str) -> str:
@@ -523,8 +565,14 @@ def reading_questions(meta: dict[str, str], body: str) -> list[str]:
     ]
 
 
-def load_inbox_notes(inbox: Path, excerpt_chars: int, flow_priority: dict[str, int] | None = None) -> list[InboxNote]:
+def load_inbox_notes(
+    inbox: Path,
+    excerpt_chars: int,
+    flow_priority: dict[str, int] | None = None,
+    promoted_sources: set[str] | None = None,
+) -> list[InboxNote]:
     flow_priority = flow_priority or {}
+    promoted_sources = promoted_sources or set()
     notes: list[InboxNote] = []
     for path in sorted(inbox.glob("*.md")):
         if path.name == "目录说明.md":
@@ -535,6 +583,8 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int, flow_priority: dict[str, i
         if status in TERMINAL_STATUSES:
             continue
         rel_path = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.as_posix()
+        if normalize_repo_path(rel_path) in promoted_sources:
+            continue
         title = meta.get("标题") or path.stem
         platform = meta.get("来源平台") or "未知"
         author = meta.get("作者或频道") or "未知"
@@ -719,6 +769,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--excerpt-chars", type=int, default=1200, help="Maximum reading excerpt characters per item.")
     parser.add_argument("--cooldown-hours", type=int, default=24, help="Skip items pushed without feedback within this many hours. Use 0 to disable.")
     parser.add_argument("--include-low-quality", action="store_true", help="Include notes marked 内容质量=需继续解析.")
+    parser.add_argument("--include-promoted", action="store_true", help="Include inbox notes that already have promoted long-term knowledge.")
     parser.add_argument("--force", action="store_true", help="Ignore push cooldown.")
     parser.add_argument("--no-state", action="store_true", help="Do not read or update push state.")
     parser.add_argument("--ignore-flow", action="store_true", help="Ignore 05_流转区 priority and rank directly from inbox notes.")
@@ -745,7 +796,8 @@ def main() -> int:
         state_file = ROOT / state_file
 
     flow_priority = {} if args.ignore_flow else parse_flow_priority(flow_dir)
-    all_notes = load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority)
+    promoted_sources = set() if args.include_promoted else load_promoted_sources(PROMOTION_ROOTS)
+    all_notes = load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority, promoted_sources)
     if not args.include_low_quality:
         all_notes = [note for note in all_notes if note.content_quality not in LOW_QUALITY_STATUSES]
     state = {"version": 1, "items": {}} if args.no_state else load_push_state(state_file)

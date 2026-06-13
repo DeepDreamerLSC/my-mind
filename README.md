@@ -206,6 +206,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py \
 - `--cooldown-hours 24` 表示 24 小时内已推送但未反馈的条目不重复推。
 - `--force` 会忽略冷却时间。
 - `--include-low-quality` 会把 `内容质量: 需继续解析` 的条目也推出来，一般只用于调试。
+- 已经有正式/已吸收长期知识回链的收件箱来源会被默认跳过；调试时可用 `--include-promoted` 临时包含。
 
 ### 发布飞书精选页
 
@@ -229,13 +230,10 @@ OPENCLAW_HOME="$HOME/.openclaw" lark-cli config default-as user
 OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
 ```
 
-确认 `identity` 是 `user` 后发布精选 bundle：
+确认 `identity` 是 `user` 后，OpenClaw 默认只调用一个出口。这个出口会先检查最新前台推送是否已有飞书精选 bundle；没有就发布，再生成可直接转发的飞书消息：
 
 ```bash
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
-MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id' \
-MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token' \
-python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
+python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py
 ```
 
 如果要移动到指定飞书知识库目录，用本地环境变量注入目标空间，不要写进仓库：
@@ -245,13 +243,14 @@ export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
 export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='目标目录node_token'
 ```
 
-生成 OpenClaw 可直接转发的飞书消息：
+底层调试命令：
 
 ```bash
+python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 python3 .codex/skills/feishu-publish/scripts/build_openclaw_feishu_message.py
 ```
 
-这条命令会输出飞书知识库精选索引链接和少量重点标题。它必须找到与最新 `前台推送-*.md` 匹配的已发布 bundle 索引记录；如果找不到，会失败并提示先发布飞书精选 bundle。OpenClaw 不应退回发送原文链接。
+`prepare_openclaw_feishu_message.py` 会输出飞书知识库精选索引链接和少量重点标题。它会自动补齐飞书发布链路；如果发布失败，OpenClaw 应把失败原因转成短提示，不应退回发送原文链接或前台推送 Markdown。
 
 ### 记录和消费前台反馈
 
@@ -537,7 +536,7 @@ OpenClaw 适合做前台秘书：
 - 你说“入箱”时，只调用入箱技能，把内容写入 `00_收件箱/`。
 - 你说“入库”时，调用 `knowledge-intake`，先入箱，再推进到候选知识和确认问题清单。
 - 当前 OpenClaw 原生 `openclaw skills list` 不会自动发现项目内 `.codex/skills/knowledge-intake`；本机 OpenClaw workspace 已补薄入口 `my-mind-knowledge-intake`，实际仍调用本仓库脚本，避免两套实现分叉。
-- 调用 `build_openclaw_feishu_message.py` 读取最新飞书知识库链接，必要时拆分成多条短消息推给你。
+- 调用 `prepare_openclaw_feishu_message.py` 自动发布或复用最新飞书精选，并把飞书知识库链接拆成短消息推给你。
 - 收集你的短反馈，并追加到 `85_运行记录/前台反馈队列.jsonl`。
 - 不直接判断长期知识结构，不直接改写资料库正文。
 
