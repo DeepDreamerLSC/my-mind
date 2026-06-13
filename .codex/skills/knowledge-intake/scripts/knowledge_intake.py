@@ -30,6 +30,15 @@ INSIGHT_ROOT = ROOT / "65_洞察/候选洞察"
 
 DEFAULT_INTAKE_MAX_TRANSCRIBE_SECONDS = 3600
 
+PROMOTION_GATE_ITEMS = [
+    "原始来源已保留，来源链接或来源文件可追溯。",
+    "解析质量足够，视频转写、OCR 或摘录没有明显空缺。",
+    "关键术语已经校对，英文产品名、人名和工具名没有明显误识别。",
+    "正文已用简体中文重写，区分来源事实、我的判断和待验证内容。",
+    "至少有一条可复用结论、提示词、项目影响或行动建议。",
+    "已建立必要的项目、领域或主题关联。",
+]
+
 
 @dataclass(frozen=True)
 class ProjectInfo:
@@ -528,6 +537,21 @@ def render_project_impact_lines(project_impacts: list[ProjectImpact]) -> list[st
     return lines
 
 
+def render_promotion_gate_lines() -> list[str]:
+    lines = [
+        "- 当前状态：候选待确认，不能直接视为长期知识。",
+        "- 转正前检查：",
+    ]
+    lines.extend(f"  - {item}" for item in PROMOTION_GATE_ITEMS)
+    lines.extend(
+        [
+            "- 通过后动作：把 `处理状态` 改为 `已处理`，把 `吸收状态` 改为 `已吸收` 或 `已应用`，必要时开启飞书精选同步。",
+            "- 未通过动作：保留候选，回到来源继续解析、校对、补充我的判断或降级为资料暂存。",
+        ]
+    )
+    return lines
+
+
 def infer_topics(note: Any, result: Any) -> list[str]:
     topics = list_values(note.frontmatter.get("主题"))
     text = f"{note.title}\n{note.body[:2400]}"
@@ -606,6 +630,22 @@ def frontmatter_block(
         lines.extend(f"    - {yaml_scalar(suggestion)}" for suggestion in primary.suggestions)
     lines.extend(
         [
+            "转正门禁:",
+            "  状态: \"待检查\"",
+            "  检查项:",
+        ]
+    )
+    lines.extend(f"    - {yaml_scalar(item)}" for item in PROMOTION_GATE_ITEMS)
+    lines.extend(
+        [
+            "  阻塞原因:",
+            "    - \"候选待确认，尚未通过长期知识转正门禁\"",
+            "  最近检查: \"\"",
+            "  检查者: \"Codex后台\"",
+        ]
+    )
+    lines.extend(
+        [
             "标签:",
             f"  - {category}",
             "  - 候选",
@@ -667,6 +707,10 @@ def render_library_candidate(note: Any, result: Any, title: str, project_impacts
         "## 项目影响建议",
         "",
         *render_project_impact_lines(project_impacts),
+        "",
+        "## 长期知识转正",
+        "",
+        *render_promotion_gate_lines(),
         "",
         "## 待验证事实",
         "",
@@ -731,6 +775,10 @@ def render_prompt_candidate(note: Any, result: Any, title: str, project_impacts:
         "",
         *render_project_impact_lines(project_impacts),
         "",
+        "## 长期知识转正",
+        "",
+        *render_promotion_gate_lines(),
+        "",
         "## 风险",
         "",
     ]
@@ -762,6 +810,10 @@ def render_insight_candidate(note: Any, result: Any, title: str, project_impacts
         "## 对项目的影响",
         "",
         *render_project_impact_lines(project_impacts),
+        "",
+        "## 长期知识转正",
+        "",
+        *render_promotion_gate_lines(),
         "",
         "## 不确定性",
         "",
