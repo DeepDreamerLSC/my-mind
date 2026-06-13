@@ -1,0 +1,4 @@
+interface:
+  display_name: "Obsidian 关联建议"
+  short_description: "为 my-mind 笔记生成 Obsidian 关联建议"
+  default_prompt: "Use $obsidian-linking to inspect a my-mind note and suggest Obsidian links, projects, topics, and graph hygiene improvements."

@@ -1,0 +1,53 @@
+filters:
+  and:
+    - 'file.ext == "md"'
+    - or:
+        - 'file.inFolder("00_收件箱")'
+        - 'file.inFolder("05_流转区/30_待沉淀")'
+        - 'file.inFolder("20_资料库")'
+        - 'file.inFolder("75_提示词库")'
+        - 'file.inFolder("65_洞察/候选洞察")'
+properties:
+  file.name:
+    displayName: 文件
+  file.folder:
+    displayName: 目录
+  file.mtime:
+    displayName: 最近修改
+  'note["标题"]':
+    displayName: 标题
+  'note["阅读状态"]':
+    displayName: 阅读状态
+  'note["处理状态"]':
+    displayName: 处理状态
+  'note["吸收状态"]':
+    displayName: 吸收状态
+  'note["洞察状态"]':
+    displayName: 洞察状态
+  'note["关联项目"]':
+    displayName: 关联项目
+  'note["关联领域"]':
+    displayName: 关联领域
+  'note["主题"]':
+    displayName: 主题
+views:
+  - type: table
+    name: 待沉淀
+    filters:
+      or:
+        - 'file.inFolder("05_流转区/30_待沉淀")'
+        - 'note["吸收状态"] == "待确认"'
+        - 'note["处理状态"] == "候选"'
+        - 'note["洞察状态"] == "候选"'
+    order:
+      - file.name
+      - 'note["标题"]'
+      - 'note["阅读状态"]'
+      - 'note["处理状态"]'
+      - 'note["吸收状态"]'
+      - 'note["洞察状态"]'
+      - 'note["关联项目"]'
+      - 'note["关联领域"]'
+      - 'note["主题"]'
+      - file.mtime
+    limit: 100

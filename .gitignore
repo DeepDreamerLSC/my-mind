@@ -3,4 +3,6 @@
 __pycache__/
 *.py[cod]
 .obsidian/workspace.json
+.obsidian/graph.json
+/未命名.base
 85_运行记录/*目录映射*.local.json

@@ -1,0 +1,56 @@
+filters:
+  and:
+    - 'file.ext == "md"'
+    - or:
+        - 'file.inFolder("20_资料库")'
+        - 'file.inFolder("30_原子笔记")'
+        - 'file.inFolder("65_洞察")'
+        - 'file.inFolder("75_提示词库")'
+properties:
+  file.name:
+    displayName: 文件
+  file.folder:
+    displayName: 目录
+  file.mtime:
+    displayName: 最近修改
+  'note["标题"]':
+    displayName: 标题
+  'note["类别"]':
+    displayName: 类别
+  'note["处理状态"]':
+    displayName: 处理状态
+  'note["吸收状态"]':
+    displayName: 吸收状态
+  'note["洞察状态"]':
+    displayName: 洞察状态
+  'note["需要人工确认"]':
+    displayName: 需要人工确认
+  'note["来源链接"]':
+    displayName: 来源链接
+  'note["证据来源"]':
+    displayName: 证据来源
+  'note["关联项目"]':
+    displayName: 关联项目
+  'note["主题"]':
+    displayName: 主题
+views:
+  - type: table
+    name: 候选待确认
+    filters:
+      or:
+        - 'note["处理状态"] == "候选"'
+        - 'note["吸收状态"] == "待确认"'
+        - 'note["洞察状态"] == "候选"'
+        - 'note["需要人工确认"] == "是"'
+    order:
+      - file.name
+      - 'note["标题"]'
+      - 'note["类别"]'
+      - 'note["处理状态"]'
+      - 'note["吸收状态"]'
+      - 'note["洞察状态"]'
+      - 'note["需要人工确认"]'
+      - 'note["关联项目"]'
+      - 'note["主题"]'
+      - file.mtime
+    limit: 100

@@ -1,0 +1,44 @@
+filters:
+  and:
+    - 'file.ext == "md"'
+    - or:
+        - 'file.inFolder("20_资料库")'
+        - 'file.inFolder("10_项目")'
+        - 'file.inFolder("65_洞察")'
+        - 'file.inFolder("75_提示词库")'
+properties:
+  file.name:
+    displayName: 文件
+  file.folder:
+    displayName: 目录
+  file.mtime:
+    displayName: 最近修改
+  'note["标题"]':
+    displayName: 标题
+  'note["类别"]':
+    displayName: 类别
+  'note["飞书同步"]':
+    displayName: 飞书同步
+  'note["关联项目"]':
+    displayName: 关联项目
+  'note["关联领域"]':
+    displayName: 关联领域
+  'note["主题"]':
+    displayName: 主题
+views:
+  - type: table
+    name: 飞书同步状态
+    filters:
+      or:
+        - 'note["飞书同步"]'
+        - 'file.inFolder("20_资料库")'
+    order:
+      - file.name
+      - 'note["标题"]'
+      - 'note["类别"]'
+      - 'note["飞书同步"]'
+      - 'note["关联项目"]'
+      - 'note["关联领域"]'
+      - 'note["主题"]'
+      - file.mtime
+    limit: 100
