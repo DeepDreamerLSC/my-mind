@@ -90,6 +90,7 @@ python3 .codex/skills/inbox-capture/scripts/capture_link.py \
   --extract-content \
   --transcribe-backend faster-whisper \
   --transcribe-model small \
+  --max-transcribe-seconds 3600 \
   "https://youtu.be/..."
 ```
 
@@ -125,7 +126,7 @@ python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
 ```bash
 python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
   --write \
-  "https://example.com/article"
+  --raw "https://example.com/article"
 ```
 
 处理已有收件箱来源：
@@ -145,6 +146,8 @@ python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py --write --tar
 ```
 
 运行结果会写入 `85_运行记录/入库处理-*.md`，并把候选回链追加到来源笔记的 `沉淀记录`。解析不足、未读或敏感状态不明时，只生成确认问题，不硬写长期知识。候选资料默认暂停飞书精选同步，确认后再开启。
+
+普通入箱的视频自动转写默认上限是 360 秒；明确“入库”时，`knowledge-intake` 会把上限提高到 3600 秒，也就是 1 小时。更长的视频仍可用 `--max-transcribe-seconds` 显式调整。
 
 ### 分拣收件箱
 
@@ -360,6 +363,7 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py \
 | `00_收件箱/` | 未处理内容入口。保存链接、原始片段、解析结果、视频转写和质量门禁。 |
 | `05_流转区/` | 短期行动视图，包括待读、待沉淀、待核验和暂缓。这里是生成区，可以被刷新覆盖。 |
 | `10_项目/` | 项目上下文、目标、决策、任务、问题和风险。 |
+| `15_索引/` | Obsidian 导航层，包括项目索引、主题索引、洞察索引和 Bases 动态视图。 |
 | `20_资料库/` | 经过初步整理的资料，当前默认纳入飞书精选同步。 |
 | `30_原子笔记/` | 长期可复用的单点知识。 |
 | `35_主动回忆/` | 回忆卡片和复习队列。 |
@@ -371,6 +375,94 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py \
 | `_模板/` | 笔记模板。 |
 | `_附件/` | 图片、音频、视频、导出文件等附件。 |
 | `design/` | 系统设计稿和阶段规划。 |
+
+## Obsidian 关联层
+
+第一阶段先使用 Obsidian 原生能力，不引入 Dataview 作为默认依赖：
+
+- `15_索引/项目索引.md`：从项目视角进入知识库。
+- `15_索引/主题索引.md`：从长期主题和资料分类进入知识库。
+- `15_索引/洞察索引.md`：从候选、已验证、已应用、已退役洞察进入知识库。
+- `15_索引/视图/*.base`：用 Bases 查看待读、待沉淀、候选待确认和飞书同步状态。
+- `15_索引/视图/项目知识面板.base`：按项目查看项目文件、关联资料、关联洞察、关联提示词和项目影响待确认内容。
+
+`关联项目`、`关联领域`、`主题` 三个字段建议填写 Obsidian 双链：
+
+```yaml
+关联项目:
+  - "[[10_项目/个人数据资产系统/项目总览|个人数据资产系统]]"
+关联领域:
+  - "[[20_资料库/工作流与自动化/目录说明|工作流与自动化]]"
+主题:
+  - "[[Codex 工作流]]"
+```
+
+生成某条笔记的关联建议：
+
+```bash
+python3 .codex/skills/obsidian-linking/scripts/suggest_links.py \
+  --note "20_资料库/管理与组织/某条资料.md" \
+  --write
+```
+
+脚本只生成建议报告，不直接改写原笔记；确认后再把推荐链接补进 front matter 或正文。
+
+## 项目管理联动
+
+项目目录是行动主线，知识库是判断燃料。进行中的项目需要维护这些 front matter 字段：
+
+```yaml
+项目状态: 进行中
+当前阶段: 阶段三：跑通小闭环与项目联动
+优先级: 高
+下次复盘时间: 2026-06-20
+```
+
+入库材料会生成 `项目影响建议`：
+
+- 可能转成任务候选。
+- 可能转成决策候选。
+- 可能转成风险提醒。
+- 也可能只是项目背景资料。
+
+这些建议会写进入库候选和 `85_运行记录/入库处理-*.md`，但不会直接改 `任务清单`、`决策记录` 或 `风险清单`。确认后再手动或由 Codex 按反馈回写项目文件。
+
+### 项目进度
+
+项目进度不是直接同步 commit，而是分三层：
+
+- `项目进展.md`：确认后的项目进度结论。
+- `变更证据.md`：commit、运行记录、重要工作区变化等证据索引。
+- `项目周报.md`：每周候选和确认后的项目摘要。
+
+生成项目进展巡检报告：
+
+```bash
+python3 .codex/skills/project-progress/scripts/project_progress.py --write
+```
+
+只预览，不写文件：
+
+```bash
+python3 .codex/skills/project-progress/scripts/project_progress.py --dry-run
+```
+
+确认后把候选摘要追加到项目文件：
+
+```bash
+python3 .codex/skills/project-progress/scripts/project_progress.py --write --apply
+```
+
+定时任务默认只写 `85_运行记录/项目进展巡检-*.md`，不自动 commit，也不直接改 `项目进展.md`。
+
+项目进展巡检不是纯汇总。报告必须包含 `Codex 项目分析`：
+
+- 阶段判断：当前项目推进到哪里。
+- 有效进展：哪些变化真的代表项目推进。
+- 证据噪声：哪些只是自动刷新、临时文件或过程记录。
+- 风险与阻塞：哪些问题会影响项目质量或提交节奏。
+- 下一步建议：接下来应该先做什么。
+- 回写建议：是否适合把候选写入 `项目进展.md`。
 
 ## 质量门禁
 
@@ -396,10 +488,12 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py \
 
 ## 自动化
 
-当前 Codex App 里启用了两个后台自动化：
+当前 Codex App 里启用了多个后台自动化：
 
 - `收件箱待分拣巡检`：每 6 小时执行一次，负责分拣收件箱和刷新流转区。
-- `收件箱入箱门禁审核`：每 4 小时执行一次，负责检查入箱质量、推送状态和反馈队列异常。
+- `收件箱入箱门禁审核`：每 6 小时执行一次，负责检查入箱质量、推送状态和反馈队列异常。
+- `前沿情报每日入箱`：每天早上运行前沿情报巡检并把通过门禁的候选入箱。
+- `项目进展每日巡检`：每天 20:30 生成项目进展候选报告，读取 git、运行记录和项目文件，但不自动 commit，也不自动 `--apply`。
 
 自动化配置不在仓库内，运行记录写入 `85_运行记录/`。如果怀疑自动化停了，先跑：
 
@@ -444,6 +538,7 @@ python3 .codex/skills/inbox-capture/scripts/capture_link.py \
   --extract-content \
   --transcribe-backend faster-whisper \
   --transcribe-model small \
+  --max-transcribe-seconds 3600 \
   "原链接"
 ```
 

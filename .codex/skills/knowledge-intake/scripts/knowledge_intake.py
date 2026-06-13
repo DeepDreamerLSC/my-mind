@@ -19,6 +19,7 @@ TZ = ZoneInfo("Asia/Shanghai")
 INBOX_DIR = ROOT / "00_收件箱"
 FLOW_DIR = ROOT / "05_流转区"
 RUN_DIR = ROOT / "85_运行记录"
+PROJECT_ROOT = ROOT / "10_项目"
 
 CAPTURE_SCRIPT = ROOT / ".codex/skills/inbox-capture/scripts/capture_link.py"
 TRIAGE_SCRIPT = ROOT / ".codex/skills/inbox-triage/scripts/triage_inbox.py"
@@ -26,6 +27,25 @@ TRIAGE_SCRIPT = ROOT / ".codex/skills/inbox-triage/scripts/triage_inbox.py"
 LIBRARY_ROOT = ROOT / "20_资料库"
 PROMPT_ROOT = ROOT / "75_提示词库"
 INSIGHT_ROOT = ROOT / "65_洞察/候选洞察"
+
+DEFAULT_INTAKE_MAX_TRANSCRIBE_SECONDS = 3600
+
+
+@dataclass(frozen=True)
+class ProjectInfo:
+    name: str
+    overview: Path
+    keywords: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProjectImpact:
+    project: str
+    project_link: str
+    strength: str
+    reason: str
+    suggestions: tuple[str, ...]
+    questions: tuple[str, ...]
 
 
 @dataclass
@@ -37,6 +57,7 @@ class Candidate:
     status: str
     reason: str
     content: str = ""
+    project_impacts: list[ProjectImpact] = field(default_factory=list)
     questions: list[str] = field(default_factory=list)
 
 
@@ -348,6 +369,165 @@ def list_values(value: Any) -> list[str]:
     return []
 
 
+def strip_wikilink(value: str) -> str:
+    text = str(value).strip()
+    match = re.fullmatch(r"\[\[([^|\]]+)(?:\|([^\]]+))?\]\]", text)
+    if not match:
+        return text
+    return (match.group(2) or Path(match.group(1)).name).strip()
+
+
+def project_link(project: ProjectInfo) -> str:
+    rel = Path(repo_relative(project.overview)).with_suffix("").as_posix()
+    return f"[[{rel}|{project.name}]]"
+
+
+def load_projects() -> list[ProjectInfo]:
+    projects: list[ProjectInfo] = []
+    if not PROJECT_ROOT.exists():
+        return projects
+    system_keywords = {
+        "个人数据资产系统": [
+            "my-mind",
+            "Obsidian",
+            "知识库",
+            "收件箱",
+            "流转区",
+            "分拣",
+            "飞书",
+            "OpenClaw",
+            "Codex",
+            "skill",
+            "自动化",
+            "前沿情报",
+            "项目知识面板",
+        ]
+    }
+    for directory in sorted(path for path in PROJECT_ROOT.iterdir() if path.is_dir()):
+        overview = directory / "项目总览.md"
+        if not overview.exists():
+            continue
+        name = directory.name
+        keywords = [name, *re.split(r"[-_\s]+", name), *system_keywords.get(name, [])]
+        keywords = [item for item in dict.fromkeys(keywords) if item and len(item) >= 2]
+        projects.append(ProjectInfo(name=name, overview=overview, keywords=tuple(keywords)))
+    return projects
+
+
+def signal_matches(text: str, keywords: list[str]) -> list[str]:
+    lowered = text.lower()
+    matches = []
+    for keyword in keywords:
+        if keyword.lower() in lowered:
+            matches.append(keyword)
+    return list(dict.fromkeys(matches))
+
+
+def infer_project_impacts(note: Any, result: Any, kind: str) -> list[ProjectImpact]:
+    projects = load_projects()
+    if not projects:
+        return []
+
+    project_values = [strip_wikilink(item) for item in list_values(note.frontmatter.get("关联项目"))]
+    project_values.extend(strip_wikilink(item) for item in list_values(note.frontmatter.get("项目")))
+    body_for_project = triage.strip_management_sections(note.body)[:5000]
+    text = f"{note.title}\n{body_for_project}\n{result.value}".strip()
+
+    impacts: list[ProjectImpact] = []
+    for project in projects:
+        explicit = any(project.name == value or project.name in value for value in project_values)
+        keyword_hits = signal_matches(text, list(project.keywords))
+        if not explicit and not keyword_hits:
+            continue
+        impacts.append(build_project_impact(project, text, kind, explicit=explicit, keyword_hits=keyword_hits))
+
+    if not impacts and len(projects) == 1:
+        project = projects[0]
+        generic_hits = signal_matches(text, ["项目", "任务", "决策", "风险", "复盘", "管理", "流程", "工作流"])
+        strength = "中" if generic_hits else "弱"
+        reason = "当前只有一个进行中项目，先作为项目背景资料候选观察。"
+        if generic_hits:
+            reason = "材料包含项目管理或行动信号，但未明确指向具体项目。"
+        impacts.append(build_project_impact(project, text, kind, explicit=False, keyword_hits=generic_hits, fallback_strength=strength, fallback_reason=reason))
+    return impacts[:3]
+
+
+def build_project_impact(
+    project: ProjectInfo,
+    text: str,
+    kind: str,
+    *,
+    explicit: bool,
+    keyword_hits: list[str],
+    fallback_strength: str | None = None,
+    fallback_reason: str | None = None,
+) -> ProjectImpact:
+    action_hits = signal_matches(text, ["任务", "下一步", "行动", "落地", "执行", "实现", "优化"])
+    decision_hits = signal_matches(text, ["决策", "原则", "取舍", "策略", "方向", "边界"])
+    risk_hits = signal_matches(text, ["风险", "问题", "限制", "阻塞", "卡住", "失败", "误判", "隐私", "敏感"])
+    prompt_hits = signal_matches(text, ["提示词", "prompt", "Codex", "OpenClaw", "skill", "工作流"])
+
+    if fallback_strength:
+        strength = fallback_strength
+    elif explicit or len(keyword_hits) >= 2:
+        strength = "强"
+    elif keyword_hits or action_hits or decision_hits or risk_hits or prompt_hits:
+        strength = "中"
+    else:
+        strength = "弱"
+
+    if fallback_reason:
+        reason = fallback_reason
+    elif explicit:
+        reason = "来源已显式关联该项目。"
+    else:
+        reason = "命中项目关键词：" + "、".join(keyword_hits[:6])
+
+    suggestions: list[str] = []
+    questions: list[str] = []
+    if action_hits:
+        suggestions.append("可作为任务候选，确认后再写入任务清单。")
+    if decision_hits or kind == "insight":
+        suggestions.append("可作为决策候选，确认后再写入决策记录。")
+    if risk_hits:
+        suggestions.append("可作为风险提醒或问题候选，确认后再写入风险清单或问题清单。")
+    if prompt_hits or kind == "prompt":
+        suggestions.append("可试跑为项目提示词，稳定后再写入项目提示词。")
+    if not suggestions:
+        suggestions.append("先作为项目背景资料保留关联，不自动生成项目动作。")
+
+    if strength in {"强", "中"} and suggestions[0] != "先作为项目背景资料保留关联，不自动生成项目动作。":
+        questions.append(f"是否把这条材料对「{project.name}」的影响转成任务、决策、风险或项目提示词？")
+    return ProjectImpact(
+        project=project.name,
+        project_link=project_link(project),
+        strength=strength,
+        reason=reason,
+        suggestions=tuple(dict.fromkeys(suggestions)),
+        questions=tuple(dict.fromkeys(questions)),
+    )
+
+
+def render_project_impact_lines(project_impacts: list[ProjectImpact]) -> list[str]:
+    if not project_impacts:
+        return ["- 暂无明确项目影响建议。"]
+    lines: list[str] = []
+    for impact in project_impacts:
+        lines.extend(
+            [
+                f"- 项目：{impact.project_link}",
+                f"  - 关联强度：{impact.strength}",
+                f"  - 判断依据：{impact.reason}",
+                "  - 建议动作：",
+            ]
+        )
+        lines.extend(f"    - {suggestion}" for suggestion in impact.suggestions)
+        if impact.questions:
+            lines.append("  - 待确认：")
+            lines.extend(f"    - {question}" for question in impact.questions)
+    return lines
+
+
 def infer_topics(note: Any, result: Any) -> list[str]:
     topics = list_values(note.frontmatter.get("主题"))
     text = f"{note.title}\n{note.body[:2400]}"
@@ -372,11 +552,21 @@ def infer_topics(note: Any, result: Any) -> list[str]:
     return merged[:8]
 
 
-def frontmatter_block(kind: str, note: Any, result: Any, title: str, status: str) -> list[str]:
+def frontmatter_block(
+    kind: str,
+    note: Any,
+    result: Any,
+    title: str,
+    status: str,
+    project_impacts: list[ProjectImpact],
+) -> list[str]:
     source = repo_relative(note.path)
     url = source_url(note)
     topics = infer_topics(note, result)
     category = {"library": "资料", "prompt": "提示词", "insight": "洞察"}.get(kind, "资料")
+    related_projects = [impact.project_link for impact in project_impacts] or [
+        "[[10_项目/个人数据资产系统/项目总览|个人数据资产系统]]"
+    ]
     lines = [
         "---",
         f"类别: {category}",
@@ -391,9 +581,9 @@ def frontmatter_block(kind: str, note: Any, result: Any, title: str, status: str
         f"来源平台: {yaml_scalar(note.platform or '未知')}",
         f"作者: {yaml_scalar(note.frontmatter.get('作者或频道') or '未知')}",
         "关联项目:",
-        "  - 个人数据资产系统",
-        "关联领域:",
     ]
+    lines.extend(f"  - {yaml_scalar(project)}" for project in related_projects)
+    lines.append("关联领域:")
     if kind == "prompt":
         lines.append("  - 人工智能协作")
     elif kind == "insight":
@@ -402,6 +592,18 @@ def frontmatter_block(kind: str, note: Any, result: Any, title: str, status: str
         lines.append("  - 资料库候选")
     lines.append("主题:")
     lines.extend([f"  - {yaml_scalar(item)}" for item in (topics or ["待补充"])])
+    if project_impacts:
+        primary = project_impacts[0]
+        lines.extend(
+            [
+                "项目影响:",
+                f"  项目: {yaml_scalar(primary.project_link)}",
+                f"  关联强度: {yaml_scalar(primary.strength)}",
+                f"  判断依据: {yaml_scalar(primary.reason)}",
+                "  建议动作:",
+            ]
+        )
+        lines.extend(f"    - {yaml_scalar(suggestion)}" for suggestion in primary.suggestions)
     lines.extend(
         [
             "标签:",
@@ -430,10 +632,10 @@ def frontmatter_block(kind: str, note: Any, result: Any, title: str, status: str
     return lines
 
 
-def render_library_candidate(note: Any, result: Any, title: str) -> str:
+def render_library_candidate(note: Any, result: Any, title: str, project_impacts: list[ProjectImpact]) -> str:
     text = source_text(note, 6000)
     lines = [
-        *frontmatter_block("library", note, result, title, "候选"),
+        *frontmatter_block("library", note, result, title, "候选", project_impacts),
         f"# {title}",
         "",
         "## 资料背景",
@@ -462,6 +664,10 @@ def render_library_candidate(note: Any, result: Any, title: str) -> str:
         "",
         normalize_placeholder(extract_section(note.body, "阅读思考") or "待补充。"),
         "",
+        "## 项目影响建议",
+        "",
+        *render_project_impact_lines(project_impacts),
+        "",
         "## 待验证事实",
         "",
     ]
@@ -479,10 +685,10 @@ def render_library_candidate(note: Any, result: Any, title: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_prompt_candidate(note: Any, result: Any, title: str) -> str:
+def render_prompt_candidate(note: Any, result: Any, title: str, project_impacts: list[ProjectImpact]) -> str:
     text = source_text(note, 5000)
     lines = [
-        *frontmatter_block("prompt", note, result, title, "候选"),
+        *frontmatter_block("prompt", note, result, title, "候选", project_impacts),
         f"# {title}",
         "",
         "## 用途",
@@ -521,6 +727,10 @@ def render_prompt_candidate(note: Any, result: Any, title: str) -> str:
         "- 如果稳定有用，再升级为正式提示词或 `.codex/skills/`。",
         "- 如果只是单次经验，保留为资料候选即可。",
         "",
+        "## 项目影响建议",
+        "",
+        *render_project_impact_lines(project_impacts),
+        "",
         "## 风险",
         "",
     ]
@@ -528,10 +738,10 @@ def render_prompt_candidate(note: Any, result: Any, title: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_insight_candidate(note: Any, result: Any, title: str) -> str:
+def render_insight_candidate(note: Any, result: Any, title: str, project_impacts: list[ProjectImpact]) -> str:
     text = source_text(note, 5000)
     lines = [
-        *frontmatter_block("insight", note, result, title, "候选"),
+        *frontmatter_block("insight", note, result, title, "候选", project_impacts),
         f"# {title}",
         "",
         "## 观察到的模式",
@@ -551,7 +761,7 @@ def render_insight_candidate(note: Any, result: Any, title: str) -> str:
         "",
         "## 对项目的影响",
         "",
-        "- 待用户确认后再写入项目决策、提示词或长期知识结构。",
+        *render_project_impact_lines(project_impacts),
         "",
         "## 不确定性",
         "",
@@ -560,12 +770,12 @@ def render_insight_candidate(note: Any, result: Any, title: str) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_candidate(kind: str, note: Any, result: Any, title: str) -> str:
+def render_candidate(kind: str, note: Any, result: Any, title: str, project_impacts: list[ProjectImpact]) -> str:
     if kind == "prompt":
-        return render_prompt_candidate(note, result, title)
+        return render_prompt_candidate(note, result, title, project_impacts)
     if kind == "insight":
-        return render_insight_candidate(note, result, title)
-    return render_library_candidate(note, result, title)
+        return render_insight_candidate(note, result, title, project_impacts)
+    return render_library_candidate(note, result, title, project_impacts)
 
 
 def candidate_title(note: Any, kind: str) -> str:
@@ -594,17 +804,31 @@ def should_create_candidate(note: Any, result: Any, force_unread: bool, force: b
 def make_candidate(note: Any, result: Any, explicit_target: str, force_unread: bool, force: bool) -> Candidate:
     create, reason = should_create_candidate(note, result, force_unread, force)
     kind, directory, target_reason = destination_for_result(note, result, explicit_target)
+    project_impacts = infer_project_impacts(note, result, kind)
     title = candidate_title(note, kind)
     target = unique_path(directory / f"{title}.md")
     questions = []
     if not create:
         questions.append(f"是否对《{note.title}》继续处理？建议：继续解析 / 补充判断 / 跳过。")
-        return Candidate(source=note.path, target=target, kind=kind, title=title, status="暂缓", reason=reason, questions=questions)
+        for impact in project_impacts:
+            questions.extend(impact.questions)
+        return Candidate(
+            source=note.path,
+            target=target,
+            kind=kind,
+            title=title,
+            status="暂缓",
+            reason=reason,
+            project_impacts=project_impacts,
+            questions=list(dict.fromkeys(questions)),
+        )
 
-    content = render_candidate(kind, note, result, title)
+    content = render_candidate(kind, note, result, title, project_impacts)
     questions.append(f"已生成《{title}》候选。是否确认后续晋升为长期知识？回复：确认 / 调整 / 跳过。")
     if kind == "insight":
         questions.append("这条是候选洞察，请确认它是否代表你的真实判断。")
+    for impact in project_impacts:
+        questions.extend(impact.questions)
     return Candidate(
         source=note.path,
         target=target,
@@ -613,7 +837,8 @@ def make_candidate(note: Any, result: Any, explicit_target: str, force_unread: b
         status="已生成候选",
         reason=f"{reason} {target_reason}",
         content=content,
-        questions=questions,
+        project_impacts=project_impacts,
+        questions=list(dict.fromkeys(questions)),
     )
 
 
@@ -700,6 +925,23 @@ def render_report(run: IntakeRun, *, write: bool) -> str:
             )
     else:
         lines.append("暂无自动生成候选。")
+    lines.extend(["", "## 项目影响建议", ""])
+    impact_items = [item for item in [*run.candidates, *run.deferred] if item.project_impacts]
+    if impact_items:
+        for item in impact_items:
+            lines.extend(
+                [
+                    f"### {item.title}",
+                    "",
+                    f"- 来源：`{repo_relative(item.source)}`",
+                    f"- 状态：{item.status}",
+                    "",
+                ]
+            )
+            lines.extend(render_project_impact_lines(item.project_impacts))
+            lines.append("")
+    else:
+        lines.append("暂无明确项目影响建议。")
     lines.extend(["", "## 暂缓和待确认", ""])
     pending = [*run.deferred, *[item for item in run.candidates if item.status != "已生成候选"]]
     if pending:
@@ -737,10 +979,17 @@ def write_report(report: str) -> Path:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Process my-mind 入库 requests from raw material to candidate knowledge.")
     parser.add_argument("materials", nargs="*", help="URLs or plain text snippets to intake.")
+    parser.add_argument("--raw", action="append", default=[], help="Raw user message to intake. Repeatable.")
     parser.add_argument("--source", action="append", default=[], help="Existing 00_收件箱 source note to process. Repeatable.")
     parser.add_argument("--title", default="", help="Title for plain text intake.")
     parser.add_argument("--target", choices=["auto", "library", "prompt", "insight"], default="auto", help="Candidate target type.")
     parser.add_argument("--reading-status", choices=["已读", "未读"], default="已读", help="Reading status for newly captured material.")
+    parser.add_argument(
+        "--max-transcribe-seconds",
+        type=int,
+        default=DEFAULT_INTAKE_MAX_TRANSCRIBE_SECONDS,
+        help="Video transcription duration limit passed to inbox-capture for explicit 入库 requests.",
+    )
     parser.add_argument("--force-unread", action="store_true", help="Generate candidates even when source reading status is not 已读.")
     parser.add_argument("--force", action="store_true", help="Allow generating a new candidate even when source already has candidate links.")
     parser.add_argument("--no-capture", action="store_true", help="Do not call inbox-capture for URL materials.")
@@ -757,10 +1006,17 @@ def main() -> int:
     write = bool(args.write)
     run = IntakeRun()
 
-    urls, snippets = split_materials(args.materials)
+    raw_materials = [*args.raw, *args.materials]
+    urls, snippets = split_materials(raw_materials)
     if urls and args.no_capture:
         raise RuntimeError("收到 URL 但启用了 --no-capture；请改用 --source 指向已有收件箱笔记。")
-    captured_urls, capture_output = capture_urls(urls, write=write, reading_status=args.reading_status, extra_args=args.capture_arg)
+    capture_args = list(args.capture_arg)
+    has_transcribe_limit = any(
+        item == "--max-transcribe-seconds" or item.startswith("--max-transcribe-seconds=") for item in capture_args
+    )
+    if urls and not has_transcribe_limit:
+        capture_args = ["--max-transcribe-seconds", str(args.max_transcribe_seconds), *capture_args]
+    captured_urls, capture_output = capture_urls(urls, write=write, reading_status=args.reading_status, extra_args=capture_args)
     captured_text = capture_snippets(snippets, write=write, title=args.title, reading_status=args.reading_status)
     run.captured.extend(captured_urls)
     run.captured.extend(captured_text)

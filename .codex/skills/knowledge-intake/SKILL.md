@@ -19,6 +19,7 @@ description: Orchestrate my-mind “入库” requests from raw material to cand
 -> 复用 inbox-capture / inbox-triage 的解析和分类能力
 -> 判断待读、待沉淀、可生成候选、需继续解析
 -> 生成候选知识或确认问题
+-> 生成项目影响建议
 -> 刷新 05_流转区
 -> 写入 85_运行记录/入库处理-*.md
 ```
@@ -37,7 +38,7 @@ python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
 ```bash
 python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
   --write \
-  "https://example.com/article"
+  --raw "https://example.com/article"
 ```
 
 处理已有收件箱来源：
@@ -60,10 +61,13 @@ python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
 ## 自动化边界
 
 - 自动保存：链接、文本、解析结果和来源回链必须保存在 `00_收件箱/`。
+- 显式入库：用户说“入库”时，视频转写上限默认提高到 3600 秒；普通 `inbox-capture` 仍保持 360 秒的前台快速门禁。
 - 自动分拣：只回写本次入库涉及的来源，避免批量改动无关待分拣条目。
 - 自动候选：信息量足够且默认已读的条目，可以生成候选资料、候选提示词或候选洞察。
+- 项目影响：候选生成时同步判断是否可能影响进行中项目，输出任务候选、决策候选、风险提醒、项目提示词或背景资料建议。
 - 自动刷新：候选生成后刷新 `05_流转区/`，让“待读 / 待沉淀 / 待核验”继续可见。
 - 不自动确认长期知识：候选文件默认标记 `处理状态: 候选`、`吸收状态: 待确认`，需要后续确认后才算“化为己有”。
+- 不自动改项目管理文件：项目影响建议只写入候选文档和入库报告，不直接修改 `任务清单`、`决策记录`、`风险清单` 或 `项目提示词`。
 
 ## 目标选择
 
@@ -89,6 +93,7 @@ python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py --write --tar
 - 解析质量不足，需要继续转写、OCR 或人工核验。
 - 候选已生成，但是否晋升长期知识需要用户判断。
 - 涉及项目决策、管理原则、个人观点或洞察判断。
+- 材料可能影响项目任务、决策、风险或提示词，需要确认是否回写项目。
 - 可能重复、过时、来源不可靠或内容敏感。
 
 用户可以用短回复推进：
