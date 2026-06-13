@@ -1,0 +1,4 @@
+interface:
+  display_name: "Pending Distill"
+  short_description: "Consume my-mind pending distillation queues"
+  default_prompt: "Use $pending-distill to consume pending my-mind distillation items and prepare confirmations."

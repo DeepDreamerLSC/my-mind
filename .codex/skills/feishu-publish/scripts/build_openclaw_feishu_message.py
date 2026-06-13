@@ -157,7 +157,9 @@ def render_message(record: dict[str, object], max_items: int, summary_chars: int
     ]
     highlights = item_lines(record, max_items=max_items, summary_chars=summary_chars)
     if highlights:
-        lines.extend(["", "精选条目：" if is_bundle else "先看这几条：", *highlights])
+        lines.extend(["", "精选条目：" if is_bundle else "先看这几条："])
+        for highlight in highlights:
+            lines.extend(["", highlight])
     lines.extend(
         [
             "",

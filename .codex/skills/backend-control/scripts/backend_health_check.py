@@ -226,6 +226,7 @@ def inspect_run_records(run_dir: Path) -> dict[str, Any]:
     return {
         "latest_triage": latest_file("收件箱分拣巡检-*.md", run_dir),
         "latest_gate": latest_file("收件箱入箱门禁-*.md", run_dir) or latest_file("收件箱分拣巡检-*.md", run_dir),
+        "latest_parse_repair": latest_file("解析质量修复-*.md", run_dir),
         "latest_push": latest_file("前台推送-*.md", run_dir),
         "latest_feedback": latest_file("反馈消费-*.md", run_dir),
         "latest_feishu_publish": latest_file("飞书精选页/索引/*.md", run_dir) or latest_file("飞书阅读页/飞书阅读页-*.md", run_dir),

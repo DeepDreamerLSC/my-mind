@@ -40,6 +40,14 @@ def clean_title(title: str, max_chars: int = 90) -> str:
     return value[: max_chars - 1].rstrip() + "…"
 
 
+def stable_item_draft_path(directory: Path, item: base.PushItem) -> Path:
+    return directory / f"{item.index:02d}-{clean_title(item.title, 48)}.md"
+
+
+def stable_index_draft_path(directory: Path) -> Path:
+    return directory / f"精选索引-{dt.datetime.now(TZ).strftime('%Y-%m-%d')}.md"
+
+
 def stable_json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -147,6 +155,17 @@ def latest_record_for(records: list[dict[str, object]], *, record_type: str, key
     return None
 
 
+def latest_wiki_context(records: list[dict[str, object]]) -> tuple[str, str]:
+    for record in reversed(records):
+        if record.get("record_type") != "frontdesk_bundle_index" or record.get("status") != "已发布":
+            continue
+        space_id = str(record.get("wiki_space_id") or "").strip()
+        parent_token = str(record.get("wiki_parent_node_token") or "").strip()
+        if space_id or parent_token:
+            return space_id, parent_token
+    return "", ""
+
+
 def load_item_parent_map(path: str | Path) -> dict[str, str]:
     map_path = resolve_path(path)
     if not map_path.exists():
@@ -162,14 +181,9 @@ def item_classification_text(item: base.PushItem) -> str:
         [
             item.title,
             item.source,
-            item.status,
-            item.value,
-            item.distill_direction,
             item.source_file,
             item.summary,
             item.excerpt,
-            item.questions,
-            item.quality,
             item.original_url,
             item.share_url,
         ]
@@ -179,13 +193,13 @@ def item_classification_text(item: base.PushItem) -> str:
 ITEM_PARENT_RULES: list[tuple[str, str, str]] = [
     (
         "20_资料库/人工智能产业",
-        r"人工智能产业|ai usage|economics|saas|a16z|benedict|基础设施|usage and what|software economics|模型经济|产业|商业模式",
+        r"人工智能产业|ai usage|economics|saas|a16z|benedict|基础设施|usage and what|software economics|模型经济|产业|商业模式|nvidia|jensen|huang|黄仁勋|cuda|算力|芯片|数据中心|ai revolution",
         "命中 AI 产业、SaaS 或商业经济语义",
     ),
     (
         "20_资料库/工作流与自动化",
-        r"工作流|自动化|workflow|automation|第二大脑|second brain|code challenge|capture|organize|distill|express|tiago|月末|报告|dashboard|dashboards|finance|财务|知识工作|productivity|生产力",
-        "命中知识工作流、自动化或第二大脑语义",
+        r"codex.*(prompt|提示词|skill|工作流|workflow|agent)|codex agent|subagent|工作流优化|越用越聪明|神级prompt",
+        "命中 Codex、Skill 或 Agent 工作流语义",
     ),
     (
         "20_资料库/设计与视觉",
@@ -198,14 +212,19 @@ ITEM_PARENT_RULES: list[tuple[str, str, str]] = [
         "命中写作或表达语义",
     ),
     (
-        "20_资料库/AI产品与工具",
-        r"codex|claude code|anthropic|openai|chatgpt|ai工具|agentic ai|agent|智能体|prompt|提示词|大模型|基础模型",
-        "命中 AI 产品、工具或提示词语义",
-    ),
-    (
         "20_资料库/管理与组织",
         r"团队管理|管理者|领导力|领导|leader|leadership|manager|management|激活团队|下属|经营者|一把手|职场管理|人才管理|管理决策|组织架构|驭人术",
         "命中管理、组织或领导力语义",
+    ),
+    (
+        "20_资料库/工作流与自动化",
+        r"工作流|自动化|workflow|automation|第二大脑|second brain|code challenge|capture|organize|distill|express|tiago|月末|报告|dashboard|dashboards|finance|财务|知识工作|productivity|生产力",
+        "命中知识工作流、自动化或第二大脑语义",
+    ),
+    (
+        "20_资料库/AI产品与工具",
+        r"codex|claude code|anthropic|openai|chatgpt|ai工具|agentic ai|agent|智能体|prompt|提示词|大模型|基础模型",
+        "命中 AI 产品、工具或提示词语义",
     ),
 ]
 
@@ -501,13 +520,24 @@ def publish_one(
         wiki_node_token = str(existing.get("wiki_node_token") or "")
         wiki_move_output = ""
         operation = "reused"
-        if wiki_parent_node_token and wiki_node_token and existing_parent != wiki_parent_node_token:
-            wiki_move_output = run_wiki_node_move_command(
-                wiki_node_token=wiki_node_token,
-                wiki_space_id=wiki_space_id,
-                wiki_parent_node_token=wiki_parent_node_token,
-            )
-            operation = "reused-moved"
+        if wiki_parent_node_token:
+            if wiki_node_token and existing_parent != wiki_parent_node_token:
+                wiki_move_output = run_wiki_node_move_command(
+                    wiki_node_token=wiki_node_token,
+                    wiki_space_id=wiki_space_id,
+                    wiki_parent_node_token=wiki_parent_node_token,
+                )
+                operation = "reused-moved"
+            elif not wiki_node_token and existing.get("page_token"):
+                wiki_node_token, wiki_move_output = base.run_wiki_move_command(
+                    page_token=str(existing.get("page_token") or ""),
+                    title=title,
+                    feishu_url=str(existing.get("feishu_url") or ""),
+                    wiki_space_id=wiki_space_id,
+                    wiki_parent_node_token=wiki_parent_node_token,
+                    wiki_move_command=wiki_move_command,
+                )
+                operation = "reused-moved"
         return (
             operation,
             str(existing.get("feishu_url") or ""),
@@ -606,6 +636,9 @@ def main() -> int:
         items = items[: args.max_items]
 
     records = base.load_records(record_file)
+    inferred_space_id, inferred_index_parent = latest_wiki_context(records)
+    wiki_space_id = args.wiki_move_space_id or inferred_space_id
+    index_parent_token = args.wiki_move_parent_node_token or inferred_index_parent
     item_parent_map = {} if args.no_auto_item_parent_map else load_item_parent_map(args.item_parent_map)
     item_draft_dir = draft_dir / "单篇"
     index_draft_dir = draft_dir / "索引"
@@ -625,7 +658,8 @@ def main() -> int:
                 parent_reason = "使用 --item-wiki-parent-node-token"
             else:
                 _, parent_directory, parent_reason = infer_item_parent(item, item_parent_map)
-                parent_directory = parent_directory or "未配置，回落到索引目录"
+                if not parent_directory:
+                    parent_directory = "未配置，回落到索引目录" if index_parent_token else "未配置"
             print(f"- {item.index}. {item.title}：{operation}；单篇目录：{parent_directory}（{parent_reason}）")
         return 0
 
@@ -637,7 +671,7 @@ def main() -> int:
         item_title = clean_title(item.title)
         rendered = render_item_page(item, push_path, generated_at)
         digest = item_hash(item)
-        draft_path = base.unique_path(item_draft_dir, f"{item.index:02d}-{clean_title(item.title, 48)}.md")
+        draft_path = stable_item_draft_path(item_draft_dir, item)
         draft_path.write_text(rendered, encoding="utf-8")
         existing = latest_record_for(records, record_type="frontdesk_item", key="item_identity", value=item_identity(item))
         if args.item_wiki_parent_node_token:
@@ -646,8 +680,8 @@ def main() -> int:
             item_parent_reason = "使用 --item-wiki-parent-node-token"
         else:
             inferred_parent, item_parent_directory, item_parent_reason = infer_item_parent(item, item_parent_map)
-            item_parent = inferred_parent or args.wiki_move_parent_node_token
-            if not inferred_parent and args.wiki_move_parent_node_token:
+            item_parent = inferred_parent or index_parent_token
+            if not inferred_parent and index_parent_token:
                 item_parent_directory = item_parent_directory or "索引页目录"
                 item_parent_reason = f"{item_parent_reason}，回落到 --wiki-move-parent-node-token"
         if args.write_local:
@@ -674,7 +708,7 @@ def main() -> int:
                     digest=digest,
                     create_command=args.publish_command,
                     update_command=args.update_command,
-                    wiki_space_id=args.wiki_move_space_id,
+                    wiki_space_id=wiki_space_id,
                     wiki_parent_node_token=item_parent,
                     wiki_move_command=args.wiki_move_command,
                     force=args.force,
@@ -689,7 +723,7 @@ def main() -> int:
                     title=item_title,
                     feishu_url=feishu_url,
                     page_token=page_token,
-                    wiki_space_id=args.wiki_move_space_id,
+                    wiki_space_id=wiki_space_id,
                     wiki_node_token=wiki_node_token,
                     wiki_parent_node_token=item_parent,
                     wiki_parent_directory=item_parent_directory,
@@ -726,7 +760,7 @@ def main() -> int:
         project_progress=project_progress,
     )
     digest = index_hash(title, item_records, project_progress)
-    index_draft_path = base.unique_path(index_draft_dir, f"精选索引-{base.now_filename()}.md")
+    index_draft_path = stable_index_draft_path(index_draft_dir)
     index_draft_path.write_text(index_rendered, encoding="utf-8")
 
     existing_index = latest_record_for(records, record_type="frontdesk_bundle_index", key="title", value=title)
@@ -754,8 +788,8 @@ def main() -> int:
             digest=digest,
             create_command=args.publish_command,
             update_command=args.update_command,
-            wiki_space_id=args.wiki_move_space_id,
-            wiki_parent_node_token=args.wiki_move_parent_node_token,
+            wiki_space_id=wiki_space_id,
+            wiki_parent_node_token=index_parent_token,
             wiki_move_command=args.wiki_move_command,
             force=args.force,
         )
@@ -769,9 +803,9 @@ def main() -> int:
             item_records=item_records,
             feishu_url=feishu_url,
             page_token=page_token,
-            wiki_space_id=args.wiki_move_space_id,
+            wiki_space_id=wiki_space_id,
             wiki_node_token=wiki_node_token,
-            wiki_parent_node_token=args.wiki_move_parent_node_token,
+            wiki_parent_node_token=index_parent_token,
             command_output=command_output,
             wiki_move_output=wiki_move_output,
         )

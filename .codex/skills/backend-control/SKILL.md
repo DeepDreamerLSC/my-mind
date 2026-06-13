@@ -32,6 +32,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 - Codex App 自动化配置和频率。
 - `05_流转区/` 的待读、待沉淀、待核验数量。
 - `00_收件箱/` 的处理状态、解析质量和低质量条目。
+- `parse-quality-repair` 的最近运行记录和待核验修复状态。
 - `85_运行记录/前台反馈队列.jsonl` 的待处理反馈。
 - `85_运行记录/前台推送状态.json` 的冷却、已推送未反馈和重复触达风险。
 - 最近的分拣、门禁、前台推送、飞书发布、飞书同步和反馈消费记录。

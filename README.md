@@ -184,6 +184,27 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 ```
 
+### 解析质量修复
+
+低质量解析队列不要直接进入前台推送或候选转正。先让后台修复明显问题：
+
+```bash
+python3 .codex/skills/parse-quality-repair/scripts/repair_parse_quality.py
+```
+
+真实写入修复记录、质量标签和待补抓清单：
+
+```bash
+python3 .codex/skills/parse-quality-repair/scripts/repair_parse_quality.py --write --limit 5
+```
+
+输出位置：
+
+- `05_流转区/40_待核验/解析质量修复队列.md`
+- `85_运行记录/解析质量修复-*.md`
+
+第一版只自动修复低风险问题，例如繁体转简体、明显术语误识别、质量门禁说明缺失。需要重抓、补 OCR、补字幕或长视频重转写的条目会继续留在待核验队列，不会硬推到长期知识。
+
 ### 生成前台推送
 
 生成给 OpenClaw 和飞书精选 bundle 使用的推送稿：
@@ -274,6 +295,24 @@ python3 .codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py \
   "1 已读：这条对我有用，后面可以沉淀成工作流"
 ```
 
+如果 OpenClaw 展示的是 `05_流转区/50_待确认/待确认队列.md`，用户可以回复：
+
+```text
+1 确认转正
+1 继续核验
+1 调整分类：提示词
+1 调整分类：资料库
+1 跳过
+```
+
+OpenClaw 应把待确认回复也追加到同一个反馈队列。若需要显式指定待确认队列：
+
+```bash
+python3 .codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py \
+  --push-file "05_流转区/50_待确认/待确认队列.md" \
+  "1 确认转正"
+```
+
 预览消费反馈：
 
 ```bash
@@ -293,6 +332,16 @@ python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py \
   --write \
   --no-distill
 ```
+
+消费待确认回复时，Codex 会执行转正门禁。通过后会更新候选文件和来源文件，并把候选标记为飞书精选待同步。需要立刻同步飞书时：
+
+```bash
+python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py \
+  --write \
+  --sync-feishu
+```
+
+没有 `--sync-feishu` 时，只开启本地 `飞书同步: 精选同步 / 待同步` 标记，后续可由 `feishu-sync` 统一发布。
 
 ### 同步本地知识库到飞书
 
@@ -531,7 +580,8 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --write --app
 当前 Codex App 里启用了多个后台自动化：
 
 - `收件箱待分拣巡检`：每 6 小时执行一次，负责分拣收件箱和刷新流转区。
-- `收件箱入箱门禁审核`：每 6 小时执行一次，负责检查入箱质量、推送状态和反馈队列异常。
+- `收件箱入箱门禁审核`：每 6 小时执行一次，先运行 `parse-quality-repair --write --limit 5`，再检查入箱质量、推送状态和反馈队列异常。
+- `前台反馈与待确认消费`：每 6 小时执行一次，运行 `frontdesk-feedback --write --sync-feishu`，消费普通阅读反馈和候选待确认回复。
 - `前沿情报每日入箱`：每天早上运行前沿情报巡检并把通过门禁的候选入箱。
 - `项目进展每日巡检`：每天 20:30 生成项目进展候选报告，读取 git、运行记录和项目文件，但不自动 commit，也不自动 `--apply`。
 

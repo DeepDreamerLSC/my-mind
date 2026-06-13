@@ -1,0 +1,4 @@
+interface:
+  display_name: "Parse Quality Repair"
+  short_description: "Repair low-quality parsed inbox notes"
+  default_prompt: "Use $parse-quality-repair to repair low-quality my-mind inbox parses and refresh the verification queue."

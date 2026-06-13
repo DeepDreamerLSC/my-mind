@@ -287,6 +287,10 @@ def unique_path(directory: Path, filename: str) -> Path:
         index += 1
 
 
+def stable_daily_draft_path(directory: Path) -> Path:
+    return directory / f"飞书阅读页-{dt.datetime.now(TZ).strftime('%Y-%m-%d')}.md"
+
+
 def parse_publish_output(output: str) -> tuple[str, str]:
     output = output.strip()
     if not output:
@@ -531,7 +535,7 @@ def main() -> int:
     push_text = read_text(push_path)
     rendered, items = render_feishu_markdown(push_path, push_text, title, max(args.max_items, 0))
     digest = content_hash(rendered)
-    draft_path = unique_path(draft_dir, f"飞书阅读页-{now_filename()}.md")
+    draft_path = stable_daily_draft_path(draft_dir)
 
     records = load_records(record_file)
     existing = find_existing_publish(records, digest, title)

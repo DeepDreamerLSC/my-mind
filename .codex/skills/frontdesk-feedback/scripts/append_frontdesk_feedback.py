@@ -15,9 +15,13 @@ ROOT = Path(__file__).resolve().parents[4]
 TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 QUEUE_NAME = "前台反馈队列.jsonl"
+CONFIRM_QUEUE_MD = ROOT / "05_流转区/50_待确认/待确认队列.md"
 
 
 ACTION_ALIASES = [
+    ("确认转正", ["确认转正", "确认晋升", "转正", "转为长期知识", "长期知识", "确认入库"]),
+    ("继续核验", ["继续核验", "先核验", "补核验", "待核验"]),
+    ("调整分类", ["调整分类", "改成提示词", "改成资料库", "改成资料", "改成洞察", "分类"]),
     ("继续解析", ["继续解析", "补解析", "补抓", "ocr", "OCR", "转写", "字幕"]),
     (
         "跳过",
@@ -38,6 +42,8 @@ ACTION_ALIASES = [
     ("已读", ["已读", "读完", "看完", "看了"]),
 ]
 
+CONFIRM_ACTIONS = {"确认转正", "继续核验", "调整分类"}
+
 
 def now_datetime() -> str:
     return dt.datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S %z")
@@ -48,10 +54,16 @@ def latest_push_file(run_dir: Path) -> Path | None:
     return files[0] if files else None
 
 
-def parse_push_targets(path: Path | None) -> dict[str, dict[str, str]]:
+def default_context_file(run_dir: Path, action: str) -> Path | None:
+    if action in CONFIRM_ACTIONS and CONFIRM_QUEUE_MD.exists():
+        return CONFIRM_QUEUE_MD
+    return latest_push_file(run_dir)
+
+
+def parse_push_targets(path: Path | None) -> dict[str, dict[str, object]]:
     if path is None or not path.exists():
         return {}
-    targets: dict[str, dict[str, str]] = {}
+    targets: dict[str, dict[str, object]] = {}
     current: str | None = None
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
         heading = re.match(r"^###\s+(\d+)\.\s+(.+)", line)
@@ -64,6 +76,12 @@ def parse_push_targets(path: Path | None) -> dict[str, dict[str, str]]:
         source = re.match(r"^- 来源文件：`(.+)`", line)
         if source:
             targets[current]["来源文件"] = source.group(1).strip()
+        candidate = re.match(r"^- 候选文件：(.+)", line)
+        if candidate:
+            paths = re.findall(r"`([^`]+)`", candidate.group(1))
+            if paths:
+                targets[current]["候选文件"] = paths[0]
+                targets[current]["候选文件列表"] = paths
     return targets
 
 
@@ -87,6 +105,10 @@ def infer_target_type(reply: str, action: str) -> str:
         return "资料库"
     if "原子" in reply:
         return "原子笔记"
+    if "洞察" in reply:
+        return "洞察"
+    if action == "确认转正":
+        return "长期知识"
     if action == "继续解析":
         if "ocr" in reply.lower():
             return "OCR"
@@ -139,11 +161,11 @@ def main() -> int:
     queue_path = Path(args.queue) if args.queue else run_dir / QUEUE_NAME
     if not queue_path.is_absolute():
         queue_path = ROOT / queue_path
-    push_path = Path(args.push_file) if args.push_file else latest_push_file(run_dir)
+    target, action, target_type, content = parse_reply(args.reply)
+    push_path = Path(args.push_file) if args.push_file else default_context_file(run_dir, action)
     if push_path and not push_path.is_absolute():
         push_path = ROOT / push_path
 
-    target, action, target_type, content = parse_reply(args.reply)
     targets = parse_push_targets(push_path)
     target_info = targets.get(target, {})
     record = {
@@ -154,6 +176,8 @@ def main() -> int:
         "目标序号": target,
         "目标标题": target_info.get("目标标题", ""),
         "来源文件": target_info.get("来源文件", ""),
+        "候选文件": target_info.get("候选文件", ""),
+        "候选文件列表": target_info.get("候选文件列表", []),
         "动作": action,
         "目标类型": target_type,
         "内容": content,
