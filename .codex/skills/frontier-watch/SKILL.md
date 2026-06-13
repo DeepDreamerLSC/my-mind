@@ -66,6 +66,13 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py --no-translate-su
 00_收件箱/YYYY-MM-DD 前沿情报 - 标题.md
 ```
 
+写入收件箱时默认标记：
+
+```yaml
+阅读状态: 未读
+处理状态: 待分拣
+```
+
 ## 门禁
 
 入选项必须：

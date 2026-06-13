@@ -1,6 +1,6 @@
 interface:
-  display_name: "飞书阅读页发布"
-  short_description: "把前台推送发布成飞书手机阅读页"
-  default_prompt: "Use $feishu-publish to turn the latest my-mind frontdesk push into a Feishu/Lark mobile reading page and record the publish link."
+  display_name: "飞书精选发布"
+  short_description: "把前台推送发布成飞书精选索引和单篇文章"
+  default_prompt: "Use $feishu-publish to publish the latest my-mind frontdesk push as a Feishu/Lark bundle: per-item wiki pages plus an index page. Then generate the OpenClaw message with build_openclaw_feishu_message.py so the user receives the Feishu wiki index link instead of original source links."
 policy:
   allow_implicit_invocation: true

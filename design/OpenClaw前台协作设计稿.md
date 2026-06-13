@@ -60,7 +60,7 @@ OpenClaw 是 `my-mind` 的前台交互层，负责把资料、提醒和反馈带
 
 - 本地 `my-mind` 是唯一可信源，保留 Markdown、状态、回链和长期知识结构。
 - 飞书知识库或飞书文档只作为手机阅读镜像，不替代本地知识库。
-- Codex 负责把精选待读、项目摘要和候选沉淀发布为飞书阅读页。
+- Codex 负责把精选待读、项目摘要和候选沉淀发布为飞书精选索引页和单篇文章。
 - Codex 负责把本地已精选的长期资料同步到飞书知识库，OpenClaw 不判断哪些内容应入选精选。
 - OpenClaw 负责把飞书链接推给用户，并收集用户在手机端的短反馈。
 - 用户在飞书或 OpenClaw 中的回复先进入 `前台反馈队列.jsonl`，再由 Codex 回写本地文件。
@@ -89,7 +89,9 @@ OpenClaw 是 `my-mind` 的前台交互层，负责把资料、提醒和反馈带
 00_收件箱/*.md
 ```
 
-OpenClaw 应优先读取 `飞书发布记录.jsonl` 中最新可用飞书链接，其次读取 `05_流转区/` 和最新前台推送；读取 `00_收件箱/` 只用于向用户展示路径、标题、解析状态和摘要，不用于自动改写。
+OpenClaw 发送前台阅读提醒时必须调用 `.codex/skills/feishu-publish/scripts/build_openclaw_feishu_message.py`，只转发飞书知识库精选索引链接、少量重点标题和回复格式。若脚本提示缺少匹配的已发布 bundle 索引记录，应先触发 `publish_frontdesk_bundle.py --publish`，不要退回发送原文链接。读取 `05_流转区/`、最新前台推送或 `00_收件箱/` 只用于状态核验、入箱反馈和异常说明，不用于生成最终阅读消息。
+
+执行归属上，OpenClaw 是前台触发器和消息转发者：它可以按 07:00、14:00、21:00 的定时任务执行“生成前台推送 -> 发布飞书精选 bundle -> 发送消息出口脚本输出”。发布、去重、更新、记录、门禁和异常修复仍由 Codex 维护的 `feishu-publish` skill 负责。OpenClaw 不需要另写一套飞书发布逻辑。
 
 ### Codex 可写
 
@@ -181,7 +183,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-ru
 - `1 继续解析`
 ```
 
-前台推送文件本身应具备手机阅读价值，可以包含较完整的摘录、阅读重点、质量提醒和原文跳转链接；默认可以覆盖全量待读。OpenClaw 直接发给用户的聊天消息必须短，优先发送飞书阅读链接、少量重点标题和可回复指令。
+前台推送文件本身应具备手机阅读价值，可以包含较完整的摘录、阅读重点、质量提醒和原文跳转链接；默认可以覆盖全量待读。Codex/feishu-publish 会把它拆成“单篇文章 + 精选索引页”。OpenClaw 直接发给用户的聊天消息必须短，且必须由飞书消息出口脚本生成，优先发送飞书知识库精选索引链接、少量重点标题和可回复指令。
 
 ---
 
@@ -228,7 +230,7 @@ OpenClaw 的前台职责主要覆盖 `📱 my-mind 手机待读`。`10_项目精
 ### 推荐流程
 
 1. Codex 生成 `85_运行记录/前台推送-*.md`。
-2. Codex 使用 `feishu-publish` 生成飞书阅读页草稿，或通过已配置的飞书 CLI/命令模板发布飞书文档或知识库节点。
+2. Codex 使用 `feishu-publish` 生成飞书精选 bundle，或通过已配置的飞书 CLI/命令模板发布飞书单篇文章和精选索引页。
 3. Codex 追加 `85_运行记录/飞书发布记录.jsonl`。
 4. OpenClaw 把飞书阅读链接推给用户；没有真实链接时，提示需要先配置飞书发布命令。
 5. 用户在手机飞书里阅读。
@@ -261,15 +263,18 @@ OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
 
 ```bash
 MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
-python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --publish
+MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id' \
+MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token' \
+python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 ```
 
 如果需要出现在具体知识库目录中，Codex 发布后继续执行文档入库移动。第一版用环境变量传入目标空间，不把空间 ID 写死进仓库：
 
 ```bash
 export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
+export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='目标目录node_token'
 MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
-python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --publish
+python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 ```
 
 第一版不做飞书到本地的双向同步。飞书页面允许重建，本地 `my-mind` 保持源库地位。
@@ -333,6 +338,8 @@ OpenClaw 收到链接或片段后，调用：
 ```bash
 python3 .codex/skills/inbox-capture/scripts/capture_link.py "<链接>"
 ```
+
+用户主动发来的链接默认写入 `阅读状态: 已读`，因为这通常表示用户已经看过并判断值得保存。自动发现、巡检抓取或用户明确表示尚未阅读的链接，才显式增加 `--reading-status 未读`。
 
 抖音、公开视频等视频链接默认会在公开页面或 `yt-dlp` 暴露媒体/音频地址且时长未超过上限时自动转写，不需要用户二次提示，也不需要 OpenClaw 追加特殊参数。
 
@@ -422,11 +429,11 @@ python3 .codex/skills/inbox-triage/scripts/triage_inbox.py --mark-sorted --write
 
 ### 阶段二：飞书手机阅读入口
 
-目标：Codex 把精选推送发布到飞书，OpenClaw 把飞书链接发给用户，用户能在手机上阅读。
+目标：Codex 把精选推送发布为飞书单篇文章和精选索引页，OpenClaw 把精选索引链接发给用户，用户能在手机上阅读。
 
 验收标准：
 
-- Codex 能生成适合手机阅读的飞书文档或知识库节点。
+- Codex 能生成适合手机阅读的飞书单篇文章和精选索引页。
 - 飞书页面保留本地来源路径和建议动作。
 - OpenClaw 能把飞书链接发送给用户。
 - 用户能基于飞书阅读内容回复短反馈。
@@ -481,8 +488,8 @@ python3 .codex/skills/inbox-triage/scripts/triage_inbox.py --mark-sorted --write
 先做四件事：
 
 1. Codex 生成 `85_运行记录/前台推送-*.md`。
-2. Codex 把精选推送发布成飞书阅读页。
-3. OpenClaw 读取最新前台推送或飞书链接并发送给用户。
+2. Codex 把精选推送发布成飞书单篇文章和精选索引页。
+3. OpenClaw 调用飞书消息出口脚本，只发送飞书知识库精选索引链接、少量摘要和回复格式。
 4. OpenClaw 把用户回复 append 到 `85_运行记录/前台反馈队列.jsonl`。
 
 这四件事跑通后，再做反馈回写和确认式沉淀。

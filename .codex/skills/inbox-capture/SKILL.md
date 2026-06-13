@@ -41,6 +41,12 @@ Out of scope for first version:
 python3 .codex/skills/inbox-capture/scripts/capture_link.py "<URL>"
 ```
 
+User-submitted links default to `阅读状态: 已读`, because the user usually sends a link after already reading or watching it. For automated discovery, crawler imports, or items the user has not personally read, pass:
+
+```bash
+python3 .codex/skills/inbox-capture/scripts/capture_link.py --reading-status 未读 "<URL>"
+```
+
 If OpenClaw/frontdesk needs an emergency fast path without OCR:
 
 ```bash
@@ -81,6 +87,7 @@ If a video note has empty `内容摘录来源`, tell the user it is “已入箱
 - File path format: `00_收件箱/YYYY-MM-DD 平台 - 标题.md`.
 - Use Chinese visible fields.
 - Set `处理状态: 待分拣`.
+- Set `阅读状态: 已读` for user-submitted links by default; use `未读` only for automated discovery or links the user explicitly has not read.
 - Set `解析状态` to one of `已解析`, `部分解析`, `解析失败`.
 - Set `内容质量` to one of `可推送`, `需核验`, `需继续解析`.
 - Set `质量门禁` to a short reason that downstream triage and frontdesk push can reuse.

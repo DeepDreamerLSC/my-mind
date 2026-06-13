@@ -53,6 +53,7 @@ class InboxNote:
     original_url: str
     transcript_url: str
     process_status: str
+    reading_status: str
     parse_status: str
     content_quality: str
     quality_gate: str
@@ -407,6 +408,8 @@ def note_score(meta: dict[str, str], body: str) -> int:
         score += 22
     elif status:
         score += 8
+    if meta.get("阅读状态") in {"已读", "已阅读"}:
+        score += 12
     if meta.get("解析状态") == "已解析":
         score += 10
     if meta.get("图片OCR字数"):
@@ -420,6 +423,8 @@ def note_score(meta: dict[str, str], body: str) -> int:
 
 def note_value(meta: dict[str, str], body: str) -> str:
     text = f"{meta.get('标题', '')}\n{body[:3000]}".lower()
+    if meta.get("阅读状态") in {"已读", "已阅读"}:
+        return "这是用户主动入箱且已读过的资料，适合优先判断是否继续沉淀，而不是再次提醒阅读。"
     if any(keyword in text for keyword in ["codex", "openai", "skill", "prompt", "提示词", "agent", "工作流"]):
         return "和 Codex、提示词、skill 或自动化直接相关，适合优先阅读并判断是否沉淀。"
     if meta.get("图片OCR字数"):
@@ -433,6 +438,8 @@ def note_value(meta: dict[str, str], body: str) -> str:
 
 def note_action(meta: dict[str, str], body: str) -> str:
     text = f"{meta.get('标题', '')}\n{body[:3000]}".lower()
+    if meta.get("阅读状态") in {"已读", "已阅读"}:
+        return "已读过；直接回复“沉淀成提示词/资料库”或补一句读后判断，不值得保留就回复“跳过”。"
     if any(keyword in text for keyword in ["codex", "openai", "skill", "prompt", "提示词", "agent", "工作流"]):
         return "已读后回复“沉淀成提示词”或补充你的判断。"
     if meta.get("来源平台") == "小红书" and not meta.get("图片OCR字数"):
@@ -550,6 +557,7 @@ def load_inbox_notes(inbox: Path, excerpt_chars: int, flow_priority: dict[str, i
                 original_url=original_url,
                 transcript_url=transcript_url,
                 process_status=status or "未知",
+                reading_status=meta.get("阅读状态") or "未标记",
                 parse_status=meta.get("解析状态") or "未知",
                 content_quality=meta.get("内容质量") or "未标记",
                 quality_gate=meta.get("质量门禁") or "",
@@ -612,7 +620,7 @@ def build_push(notes: list[InboxNote], project_dir: Path, limit: int) -> str:
                 f"### {index}. {note.title}",
                 "",
                 f"- 来源：{note.platform} / {note.author}",
-                f"- 状态：{note.process_status} / {note.parse_status}",
+                f"- 状态：{note.process_status} / {note.reading_status} / {note.parse_status}",
                 f"- 内容质量：{note.content_quality}",
                 f"- 为什么值得读：{note.value}",
                 f"- 建议动作：{note.action}",

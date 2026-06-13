@@ -4372,7 +4372,7 @@ def assess_content_quality(
     return "需继续解析", "缺少正文级摘录、OCR 或足够简介；不应进入前台阅读推送。"
 
 
-def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tuple[str, str]:
+def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading_status: str = "已读") -> tuple[str, str]:
     info = info or {}
     platform = guess_platform(url, info)
     material_type = "社媒链接" if platform in {"抖音", "小红书", "X", "TikTok"} else "视频链接"
@@ -4464,6 +4464,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
         yaml_field("图片OCR后端", (image_ocr or {}).get("backend", "")),
         yaml_field("图片OCR模型", (image_ocr or {}).get("model", "")),
         yaml_field("图片OCR字数", (image_ocr or {}).get("word_count", "")),
+        yaml_field("阅读状态", reading_status),
         "处理状态: 待分拣",
         "关联项目: []",
         "关联领域: []",
@@ -4684,7 +4685,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None) -> tupl
             "",
             "## 阅读思考",
             "",
-            "- 待阅读后补充。",
+            "- 已读，待补充读后判断。" if reading_status == "已读" else "- 待阅读后补充。",
             "- 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。",
             "- 如果和 Codex 交流过，可把交流后的新判断补在这里。",
             "",
@@ -4730,6 +4731,7 @@ def capture_url(
     transcribe_language: str = "zh",
     transcribe_command: str = "",
     max_transcribe_seconds: int = DEFAULT_MAX_TRANSCRIBE_SECONDS,
+    reading_status: str = "已读",
 ) -> Path:
     info, error = run_yt_dlp(url)
     platform = guess_platform(url, info)
@@ -4784,7 +4786,7 @@ def capture_url(
             command_template=transcribe_command,
             max_seconds=max_transcribe_seconds,
         )
-    filename, note = build_note(url, info, error)
+    filename, note = build_note(url, info, error, reading_status=reading_status)
     output_path = unique_path(inbox, filename)
     if not dry_run:
         inbox.mkdir(parents=True, exist_ok=True)
@@ -4849,6 +4851,12 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MAX_TRANSCRIBE_SECONDS,
         help="Skip transcription when known media duration exceeds this many seconds",
     )
+    parser.add_argument(
+        "--reading-status",
+        default="已读",
+        choices=["已读", "未读"],
+        help="阅读状态 written to inbox front matter. User-submitted links default to 已读; automated discovery can pass 未读.",
+    )
     return parser.parse_args()
 
 
@@ -4875,6 +4883,7 @@ def main() -> int:
                 transcribe_language=args.transcribe_language,
                 transcribe_command=args.transcribe_command,
                 max_transcribe_seconds=args.max_transcribe_seconds,
+                reading_status=args.reading_status,
             )
         )
 

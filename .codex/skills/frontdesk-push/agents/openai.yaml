@@ -1,6 +1,6 @@
 interface:
   display_name: "前台推送生成"
   short_description: "为 OpenClaw 生成待读和项目进度推送"
-  default_prompt: "Use $frontdesk-push to generate the latest my-mind frontdesk push note for OpenClaw."
+  default_prompt: "Use $frontdesk-push to generate the latest my-mind frontdesk push note as Feishu bundle material. OpenClaw should not send original source links; publish via $feishu-publish bundle and send the build_openclaw_feishu_message.py output."
 policy:
   allow_implicit_invocation: true

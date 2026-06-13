@@ -98,6 +98,10 @@ class InboxNote:
     def platform(self) -> str:
         return str(self.frontmatter.get("来源平台") or "")
 
+    @property
+    def reading_status(self) -> str:
+        return str(self.frontmatter.get("阅读状态") or "")
+
 
 @dataclass
 class TriageResult:
@@ -257,6 +261,8 @@ def normalize_feedback_text(text: str) -> str:
             "待阅读后再补充",
             "待阅读后填写。",
             "待阅读后填写",
+            "已读，待补充读后判断。",
+            "已读，待补充读后判断",
         }:
             continue
         cleaned_lines.append(line)
@@ -266,6 +272,10 @@ def normalize_feedback_text(text: str) -> str:
 def has_meaningful_reading_feedback(note: InboxNote) -> bool:
     reading_notes = extract_section(note.body, "阅读思考")
     return bool(normalize_feedback_text(reading_notes))
+
+
+def is_marked_read(note: InboxNote) -> bool:
+    return note.reading_status in {"已读", "已阅读"}
 
 
 def repo_relative_path(path: Path) -> str:
@@ -327,11 +337,14 @@ def summarize_pending_stage(note: InboxNote) -> tuple[str, list[str], str]:
     candidate_paths = [path for path, _ in candidate_targets]
     candidate_types = [candidate_type for _, candidate_type in candidate_targets]
     has_feedback = has_meaningful_reading_feedback(note)
+    has_read_status = is_marked_read(note)
 
     if candidate_targets:
         phase = "已有候选待确认"
     elif has_feedback:
         phase = "已阅读待生成候选"
+    elif has_read_status:
+        phase = "已读待补判断"
     else:
         phase = "等待阅读反馈"
 
@@ -343,6 +356,8 @@ def summarize_pending_stage(note: InboxNote) -> tuple[str, list[str], str]:
         strategy = "保持资料整理稿，不直接晋升长期知识；先补关键事实核验，再决定是否提炼成原子笔记或行业情报。"
     elif phase == "已阅读待生成候选":
         strategy = "已具备继续沉淀条件；先根据阅读思考选择一个主目标目录生成候选草稿，再决定是否需要扩展到项目任务或提示词库。"
+    elif phase == "已读待补判断":
+        strategy = "用户主动入箱，默认视为已读；先请用户补一句读后判断或直接确认沉淀方向，再生成候选草稿。"
     elif PROMPT_DESTINATION in candidate_types or PROJECT_DESTINATION in candidate_types:
         strategy = "先保留为工作流候选，再用一次真实任务验证是否真能减少重复劳动。"
     else:
@@ -533,6 +548,7 @@ def render_result_block(result: TriageResult, index: int, include_reading_feedba
         f"- 建议去向：{'、'.join(result.destinations)}",
         f"- 核心价值：{result.value}",
         f"- 下一步：{result.next_step}",
+        f"- 阅读状态：{note.reading_status or '未标记'}",
         f"- 来源平台：{note.platform or '未知'}",
         f"- 解析状态：{note.frontmatter.get('解析状态') or '未知'}",
         f"- 来源文件：`{note.path}`",
@@ -628,6 +644,7 @@ def render_flow_item(result: TriageResult, index: int, target_path: Path) -> lis
         "",
         f"- 优先级：{result.priority}",
         f"- 当前阶段：{phase}",
+        f"- 阅读状态：{note.reading_status or '未标记'}",
         f"- 建议去向：{'、'.join(result.destinations)}",
         f"- 核心价值：{result.value}",
         f"- 下一步：{result.next_step}",
@@ -717,7 +734,7 @@ def write_flow_views(reading_queue: list[TriageResult], flow_dir: Path) -> list[
 
     for result in reading_queue:
         phase, _, _ = summarize_pending_stage(result.note)
-        if phase in {"已阅读待生成候选", "已有候选待确认"}:
+        if phase in {"已阅读待生成候选", "已有候选待确认", "已读待补判断"}:
             distill_items.append(result)
         else:
             reading_items.append(result)

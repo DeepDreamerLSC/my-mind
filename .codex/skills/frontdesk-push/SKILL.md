@@ -7,7 +7,7 @@ description: Generate a Chinese frontdesk reading-card note for OpenClaw and Fei
 
 把 Codex 后台看到的 `05_流转区/` 队列、收件箱正文和项目进度，整理成 OpenClaw 可以转发、飞书可以承载的手机阅读卡片。
 
-OpenClaw 直接发消息时只需要发标题、链接和回复指令；完整内容适合发布到飞书文档或知识库节点后让用户在手机上阅读。
+这份文件是飞书精选 bundle 的素材，不是 OpenClaw 的最终聊天消息。OpenClaw 给用户发消息时，应先让 `feishu-publish` 发布成“单篇文章 + 精选索引页”，再调用 `build_openclaw_feishu_message.py` 输出飞书索引链接、少量重点标题和回复指令。
 
 ## 快速使用
 
@@ -23,7 +23,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-run
 ```
 
-默认推送所有待读候选，适合后续发布成飞书阅读页。限制推送条数：
+默认推送所有待读候选，适合后续发布成飞书精选 bundle。限制推送条数：
 
 ```bash
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --limit 5
@@ -78,7 +78,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 - 不修改 `00_收件箱/`。
 - 不写入长期知识目录。
 - 不确认事实、观点、项目决策或沉淀结果。
-- OpenClaw 优先读取 `飞书发布记录.jsonl` 里的最新飞书链接；没有飞书链接时再读取最新 `前台推送-*.md`，把精简摘要推给用户。
+- OpenClaw 必须通过 `.codex/skills/feishu-publish/scripts/build_openclaw_feishu_message.py` 生成聊天消息；如果没有匹配的已发布 bundle 索引记录，应先发布飞书精选 bundle，不要退回发送原文链接。
 - 推送优先级来自流转区；流转区缺失时才回退到收件箱评分排序。
 - 默认不推送 `内容质量: 需继续解析` 的条目；需要临时包含时显式加 `--include-low-quality`。
 - 推送状态只记录触达和反馈状态，不改变长期知识。
