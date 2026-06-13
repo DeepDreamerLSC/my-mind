@@ -22,6 +22,10 @@ TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 DEFAULT_DRAFT_DIR = DEFAULT_RUN_DIR / "飞书阅读页"
 DEFAULT_RECORD_FILE = DEFAULT_RUN_DIR / "飞书发布记录.jsonl"
+DEFAULT_UPDATE_COMMAND = (
+    'OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +update '
+    "--api-version v2 --doc {page_token} --command overwrite --doc-format markdown --new-title {title} --content @{markdown_file_rel}"
+)
 
 
 @dataclass
@@ -254,10 +258,18 @@ def load_records(record_file: Path) -> list[dict[str, object]]:
     return records
 
 
-def find_existing_publish(records: list[dict[str, object]], digest: str) -> dict[str, object] | None:
+def publish_succeeded(record: dict[str, object]) -> bool:
+    return str(record.get("status") or "").startswith("已发布") and bool(record.get("feishu_url"))
+
+
+def find_existing_publish(records: list[dict[str, object]], digest: str, title: str = "") -> dict[str, object] | None:
     for record in reversed(records):
-        if record.get("content_hash") == digest and record.get("status") == "已发布" and record.get("feishu_url"):
+        if record.get("content_hash") == digest and publish_succeeded(record):
             return record
+    if title:
+        for record in reversed(records):
+            if str(record.get("title") or "") == title and publish_succeeded(record) and record.get("page_token"):
+                return record
     return None
 
 
@@ -310,7 +322,15 @@ def parse_json_payload(output: str) -> dict[str, object] | None:
     return None
 
 
-def run_publish_command(command_template: str, markdown_file: Path, title: str, push_file: Path, record_file: Path, digest: str) -> tuple[str, str, str]:
+def run_publish_command(
+    command_template: str,
+    markdown_file: Path,
+    title: str,
+    push_file: Path,
+    record_file: Path,
+    digest: str,
+    page_token: str = "",
+) -> tuple[str, str, str]:
     try:
         markdown_file_rel = markdown_file.resolve().relative_to(Path.cwd().resolve()).as_posix()
     except ValueError:
@@ -322,6 +342,7 @@ def run_publish_command(command_template: str, markdown_file: Path, title: str, 
         "source_push": shlex.quote(str(push_file)),
         "record_file": shlex.quote(str(record_file)),
         "content_hash": shlex.quote(digest),
+        "page_token": shlex.quote(page_token),
     }
     command = command_template.format(**replacements)
     completed = subprocess.run(command, shell=True, text=True, capture_output=True, check=False)
@@ -433,11 +454,13 @@ def build_record(
     wiki_move_error: str = "",
     error: str = "",
     command_output: str = "",
+    operation: str = "",
 ) -> dict[str, object]:
     return {
         "created_at": now_datetime(),
         "status": status,
         "publish_mode": mode,
+        "operation": operation,
         "title": title,
         "source_push": repo_relative(push_path),
         "draft_path": repo_relative(draft_path),
@@ -468,6 +491,11 @@ def parse_args() -> argparse.Namespace:
         "--publish-command",
         default=os.environ.get("MY_MIND_FEISHU_PUBLISH_COMMAND", ""),
         help="Shell command template used with --publish. Use {markdown_file}, {markdown_file_rel}, {title}, {source_push}, {record_file}, and {content_hash}.",
+    )
+    parser.add_argument(
+        "--update-command",
+        default=os.environ.get("MY_MIND_FEISHU_UPDATE_COMMAND", DEFAULT_UPDATE_COMMAND),
+        help="Shell command template used to update an existing same-title page. Also supports {page_token}.",
     )
     parser.add_argument("--wiki-move-space-id", default=os.environ.get("MY_MIND_FEISHU_WIKI_SPACE_ID", ""), help="Move the published docx into this Feishu wiki space after publishing.")
     parser.add_argument("--wiki-move-parent-node-token", default=os.environ.get("MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN", ""), help="Optional parent wiki node token for --wiki-move-space-id.")
@@ -505,11 +533,30 @@ def main() -> int:
     digest = content_hash(rendered)
     draft_path = unique_path(draft_dir, f"飞书阅读页-{now_filename()}.md")
 
+    records = load_records(record_file)
+    existing = find_existing_publish(records, digest, title)
+
     if args.publish:
-        existing = find_existing_publish(load_records(record_file), digest)
         if existing and not args.force:
-            print(json.dumps(existing, ensure_ascii=False, indent=2))
-            return 0
+            if existing.get("content_hash") == digest:
+                record = build_record(
+                    status="已发布",
+                    title=title,
+                    push_path=push_path,
+                    draft_path=Path(str(existing.get("draft_path") or draft_path)),
+                    digest=digest,
+                    items=items,
+                    mode="command",
+                    feishu_url=str(existing.get("feishu_url") or ""),
+                    page_token=str(existing.get("page_token") or ""),
+                    wiki_space_id=str(existing.get("wiki_space_id") or args.wiki_move_space_id),
+                    wiki_node_token=str(existing.get("wiki_node_token") or ""),
+                    wiki_parent_node_token=str(existing.get("wiki_parent_node_token") or args.wiki_move_parent_node_token),
+                    operation="reused",
+                )
+                append_record(record_file, record)
+                print(json.dumps(record, ensure_ascii=False, indent=2))
+                return 0
 
     if not args.write_local and not args.publish:
         print(rendered, end="")
@@ -525,7 +572,7 @@ def main() -> int:
         print(repo_relative(record_file))
         return 0
 
-    if not args.publish_command:
+    if not args.publish_command and not (existing and not args.force and args.update_command):
         record = build_record(
             status="发布失败",
             title=title,
@@ -534,18 +581,35 @@ def main() -> int:
             digest=digest,
             items=items,
             mode="command",
-            error="缺少 --publish-command 或 MY_MIND_FEISHU_PUBLISH_COMMAND。",
+            error="缺少 --publish-command 或 MY_MIND_FEISHU_PUBLISH_COMMAND，且没有可更新的同标题飞书页面。",
         )
         append_record(record_file, record)
-        print("错误：缺少 --publish-command 或 MY_MIND_FEISHU_PUBLISH_COMMAND。", file=sys.stderr)
+        print("错误：缺少 --publish-command 或 MY_MIND_FEISHU_PUBLISH_COMMAND，且没有可更新的同标题飞书页面。", file=sys.stderr)
         return 2
 
     try:
-        feishu_url, page_token, command_output = run_publish_command(args.publish_command, draft_path, title, push_path, record_file, digest)
-        wiki_node_token = ""
+        operation = "created"
+        if existing and not args.force and args.update_command:
+            existing_page_token = str(existing.get("page_token") or "")
+            feishu_url, page_token, command_output = run_publish_command(
+                args.update_command,
+                draft_path,
+                title,
+                push_path,
+                record_file,
+                digest,
+                page_token=existing_page_token,
+            )
+            feishu_url = feishu_url or str(existing.get("feishu_url") or "")
+            page_token = page_token or existing_page_token
+            wiki_node_token = str(existing.get("wiki_node_token") or "")
+            operation = "updated"
+        else:
+            feishu_url, page_token, command_output = run_publish_command(args.publish_command, draft_path, title, push_path, record_file, digest)
+            wiki_node_token = ""
         wiki_move_output = ""
         wiki_move_error = ""
-        if args.wiki_move_space_id or args.wiki_move_command:
+        if operation == "created" and (args.wiki_move_space_id or args.wiki_move_command):
             try:
                 wiki_node_token, wiki_move_output = run_wiki_move_command(
                     page_token=page_token,
@@ -576,6 +640,7 @@ def main() -> int:
             wiki_move_output=wiki_move_output,
             wiki_move_error=wiki_move_error,
             command_output=command_output,
+            operation=operation,
         )
         append_record(record_file, record)
         print(feishu_url or repo_relative(draft_path))

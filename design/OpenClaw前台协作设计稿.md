@@ -499,6 +499,7 @@ python3 .codex/skills/inbox-triage/scripts/triage_inbox.py --mark-sorted --write
 
 - Codex 能生成适合手机阅读的飞书单篇文章和精选索引页。
 - 精选索引页留在 `📱 my-mind 手机待读`，单篇文章进入 `20_资料库精选/` 对应主题目录。
+- 同一天的精选索引或旧版 `今日待读` 页面按标题更新，不重复新增飞书页面。
 - 飞书页面保留本地来源路径和建议动作。
 - OpenClaw 能把飞书链接发送给用户。
 - 用户能基于飞书阅读内容回复短反馈。

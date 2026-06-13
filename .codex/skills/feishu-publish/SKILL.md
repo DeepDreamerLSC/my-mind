@@ -58,12 +58,19 @@ bundle 模式会：
 - 索引页放在 `📱 my-mind 手机待读`；单篇文章按本地目录映射自动归入 `20_资料库精选/` 的对应主题目录。
 - 通过 `source_file`、标题、页面 token 和内容 hash 复用已有文章，避免重复创建。
 - 如果已有单篇文章内容没变但父目录不对，重跑发布会移动已有 Wiki 节点，不新建重复文章。
+- 同一天的索引页按标题复用并更新，不因新的 `前台推送-*.md` 文件重复创建入口页。
 
 旧版单页飞书阅读页只作为兼容路径保留：
 
 ```bash
 python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --dry-run
 python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --write-local
+```
+
+旧版单页发布也必须按标题复用当天页面：同一个 `my-mind 今日待读 YYYY-MM-DD` 已经发布过时，后续运行应更新该页面，不新增同名文档。默认更新命令兼容本机 `lark-cli 1.0.32`：
+
+```bash
+python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --publish
 ```
 
 如果要让索引页出现在手机待读目录里，用本地环境变量注入目标空间和索引目录，不要写进仓库：
