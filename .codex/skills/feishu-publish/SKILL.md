@@ -44,7 +44,7 @@ OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
 确认 `identity` 为 `user` 后发布精选 bundle：
 
 ```bash
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}' \
 MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id' \
 MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token' \
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
@@ -55,7 +55,9 @@ bundle 模式会：
 - 为前台推送里的每条待读创建或更新一篇飞书文章。
 - 把原文链接、分享链接、摘录、OCR、转写和建议动作放进单篇文章。
 - 生成一个“今日精选”索引页，索引页每一节链接到对应飞书文章。
+- 索引页放在 `📱 my-mind 手机待读`；单篇文章按本地目录映射自动归入 `20_资料库精选/` 的对应主题目录。
 - 通过 `source_file`、标题、页面 token 和内容 hash 复用已有文章，避免重复创建。
+- 如果已有单篇文章内容没变但父目录不对，重跑发布会移动已有 Wiki 节点，不新建重复文章。
 
 旧版单页飞书阅读页只作为兼容路径保留：
 
@@ -64,13 +66,20 @@ python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --dry-run
 python3 .codex/skills/feishu-publish/scripts/publish_feishu_reading.py --write-local
 ```
 
-如果要让页面出现在具体飞书知识库目录里，发布后再自动移动到目标知识库：
+如果要让索引页出现在手机待读目录里，用本地环境变量注入目标空间和索引目录，不要写进仓库：
 
 ```bash
 export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
-export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='目标目录node_token'
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token'
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}' \
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
+```
+
+单篇文章默认读取本地私有映射 `85_运行记录/飞书知识库目录映射.local.json`，按标题、来源、摘要和沉淀方向推断目标目录。可用环境变量或参数覆盖：
+
+```bash
+MY_MIND_FEISHU_ITEM_PARENT_MAP='85_运行记录/飞书知识库目录映射.local.json' \
+python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --dry-run
 ```
 
 也可以显式传入命令：
@@ -78,7 +87,7 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publi
 ```bash
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py \
   --publish \
-  --publish-command 'OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}'
+  --publish-command 'OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}'
 ```
 
 ## 输入和输出
@@ -98,7 +107,7 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py \
 85_运行记录/飞书阅读页/飞书阅读页-YYYY-MM-DD-HHMM.md（旧版兼容）
 ```
 
-`飞书发布记录.jsonl` 中记录飞书链接、来源推送、内容哈希、条目列表、发布状态，以及可选的 `wiki_space_id` / `wiki_node_token`。OpenClaw 不直接解析前台推送里的原文链接，而是调用 `prepare_openclaw_feishu_message.py` 自动补齐“发布精选 bundle -> 生成 OpenClaw 消息”链路，并最终读取与最新前台推送匹配的已发布 `frontdesk_bundle_index` 记录。
+`飞书发布记录.jsonl` 中记录飞书链接、来源推送、内容哈希、条目列表、发布状态，以及可选的 `wiki_space_id` / `wiki_node_token` / `wiki_parent_directory`。OpenClaw 不直接解析前台推送里的原文链接，也不自己判断飞书目录，而是调用 `prepare_openclaw_feishu_message.py` 自动补齐“发布精选 bundle -> 生成 OpenClaw 消息”链路，并最终读取与最新前台推送匹配的已发布 `frontdesk_bundle_index` 记录。
 
 ## 工作边界
 

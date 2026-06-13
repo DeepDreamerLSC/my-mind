@@ -366,7 +366,7 @@ OpenClaw 不需要解释所有细节，只报告需要用户行动的部分。
 
 第一版建议在飞书知识库中维护三类入口：
 
-1. 手机待读入口，承接每日或阶段性阅读页。
+1. 手机待读入口，只承接每日或阶段性精选索引页。
 2. 待沉淀入口，承接已读、已入库或已生成候选但仍需确认的内容。
 3. 精选知识入口，承接已经本地归类、适合手机回看的长期内容。
 
@@ -375,7 +375,7 @@ OpenClaw 不需要解释所有细节，只报告需要用户行动的部分。
 ```text
 林总工的知识库
 ├── 📱 my-mind 手机待读
-│   ├── 今日待读
+│   ├── 今日精选索引
 │   ├── 待读归档
 │   └── 反馈入口说明
 ├── 🧪 my-mind 待沉淀
@@ -413,9 +413,10 @@ OpenClaw 不需要解释所有细节，只报告需要用户行动的部分。
 
 | 层级 | 本地来源 | 飞书形态 | 同步策略 |
 | --- | --- | --- | --- |
-| 手机待读 | `85_运行记录/前台推送-*.md`、`85_运行记录/飞书精选页/` | `📱 my-mind 手机待读` 下的精选索引页和单篇文章 | 可更新当天精选索引，单篇文章按来源复用 |
+| 手机待读 | `85_运行记录/前台推送-*.md`、`85_运行记录/飞书精选页/索引/` | `📱 my-mind 手机待读` 下的精选索引页 | 只保留入口页；OpenClaw 发送这个链接给用户 |
 | 待沉淀 | `05_流转区/30_待沉淀/`、`85_运行记录/入库处理-*.md`、候选文件 | `🧪 my-mind 待沉淀` 下的候选摘要和问题清单 | 只作为确认入口，不等同长期知识 |
 | 项目精选 | `10_项目/个人数据资产系统/项目总览.md`、`任务清单.md`、关键设计稿 | `10_项目精选/` | 只同步用户手机上需要看的摘要和下一步 |
+| 前台单篇精选 | `85_运行记录/飞书精选页/单篇/`、来源 `00_收件箱/` | `20_资料库精选/` 对应主题目录 | 发布脚本按目录映射自动归位；内容相同则复用并移动旧节点 |
 | 资料精选 | `20_资料库/` 中已归类、具备复用价值的资料 | `20_资料库精选/` 对应主题目录 | 只同步标记为精选的资料 |
 | 提示词精选 | `75_提示词库/` 中稳定可复用提示词 | `75_提示词库精选/` | 只同步经过试用的版本 |
 | 运行证据 | `85_运行记录/` | 通常不同步 | 只保留本地审计；必要时生成摘要页 |
@@ -483,18 +484,18 @@ OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
 
 ```bash
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --dry-run
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}' \
 MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id' \
 MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token' \
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 ```
 
-若目标是手机飞书知识库目录，而不是普通云文档搜索结果，则发布后自动移动到目标知识库。空间 ID 用本机环境变量注入，不写进仓库：
+若目标是手机飞书知识库目录，而不是普通云文档搜索结果，则发布后自动移动到目标知识库。空间 ID 用本机环境变量注入，不写进仓库。`MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN` 指向手机待读索引目录；单篇文章默认读取 `85_运行记录/飞书知识库目录映射.local.json`，按内容自动归到 `20_资料库精选/` 对应主题目录：
 
 ```bash
 export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
-export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='目标目录node_token'
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token'
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}' \
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 ```
 
@@ -503,7 +504,7 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publi
 手机待读发布链路：
 
 1. Codex 生成手机阅读稿。
-2. Codex 发布飞书精选 bundle：每条待读生成一篇单篇文章，并生成一个精选索引页。
+2. Codex 发布飞书精选 bundle：每条待读生成一篇单篇文章，并生成一个精选索引页；索引页留在手机待读，单篇文章按目录映射进入资料库精选目录。
 3. Codex 追加 `85_运行记录/飞书发布记录.jsonl`。
 4. OpenClaw 调用飞书消息出口脚本，把飞书知识库精选索引链接推给用户。
 5. 用户在飞书或 OpenClaw 对话中回复。

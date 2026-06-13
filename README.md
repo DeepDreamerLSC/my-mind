@@ -236,11 +236,23 @@ OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
 python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py
 ```
 
-如果要移动到指定飞书知识库目录，用本地环境变量注入目标空间，不要写进仓库：
+飞书精选 bundle 的目录规则：
+
+- `📱 my-mind 手机待读` 只放“今日精选”索引页，方便 OpenClaw 给手机端发一个入口。
+- 每条单篇文章会按标题、来源、摘要和沉淀方向，自动归到 `20_资料库精选/` 的对应主题目录。
+- 如果已有单篇文章内容相同但父目录不对，重跑发布会移动已有 Wiki 节点，不重复新建文档。
+
+如果要移动索引页到手机待读目录，用本地环境变量注入目标空间，不要写进仓库：
 
 ```bash
 export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
-export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='目标目录node_token'
+export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token'
+```
+
+单篇文章目录映射默认读取本地私有文件 `85_运行记录/飞书知识库目录映射.local.json`。要调试归类结果，先跑：
+
+```bash
+python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --dry-run
 ```
 
 底层调试命令：

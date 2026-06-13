@@ -77,11 +77,14 @@ def publish_args(args: argparse.Namespace, push_file: str, *, dry_run: bool) -> 
         "--wiki-move-space-id": args.wiki_move_space_id,
         "--wiki-move-parent-node-token": args.wiki_move_parent_node_token,
         "--item-wiki-parent-node-token": args.item_wiki_parent_node_token,
+        "--item-parent-map": args.item_parent_map,
         "--wiki-move-command": args.wiki_move_command,
     }
     for key, value in passthrough.items():
         if value:
             command.extend([key, value])
+    if args.no_auto_item_parent_map:
+        command.append("--no-auto-item-parent-map")
     return command
 
 
@@ -104,6 +107,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wiki-move-space-id", default="", help="Target Feishu wiki space id.")
     parser.add_argument("--wiki-move-parent-node-token", default="", help="Target parent wiki node token for index page.")
     parser.add_argument("--item-wiki-parent-node-token", default="", help="Target parent wiki node token for item pages.")
+    parser.add_argument("--item-parent-map", default="", help="Optional JSON map for per-item target wiki directories.")
+    parser.add_argument("--no-auto-item-parent-map", action="store_true", help="Disable per-item target wiki directory inference.")
     parser.add_argument("--wiki-move-command", default="", help="Override wiki move command.")
     return parser.parse_args()
 

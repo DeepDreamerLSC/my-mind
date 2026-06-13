@@ -275,18 +275,18 @@ OPENCLAW_HOME="$HOME/.openclaw" lark-cli auth status --verify
 确认 `identity=user` 后再发布：
 
 ```bash
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}' \
 MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id' \
 MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token' \
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 ```
 
-如果需要出现在具体知识库目录中，Codex 发布后继续执行文档入库移动。第一版用环境变量传入目标空间，不把空间 ID 写死进仓库：
+目录规则由 Codex 侧发布脚本负责，OpenClaw 不需要判断。`MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN` 指向 `📱 my-mind 手机待读`，只用于精选索引页；单篇文章默认读取 `85_运行记录/飞书知识库目录映射.local.json`，自动进入 `20_资料库精选/` 对应主题目录。第一版用环境变量传入目标空间，不把空间 ID 写死进仓库：
 
 ```bash
 export MY_MIND_FEISHU_WIKI_SPACE_ID='目标知识库space_id'
-export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='目标目录node_token'
-MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --content @{markdown_file_rel}' \
+export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token'
+MY_MIND_FEISHU_PUBLISH_COMMAND='OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create --api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}' \
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publish
 ```
 
@@ -498,6 +498,7 @@ python3 .codex/skills/inbox-triage/scripts/triage_inbox.py --mark-sorted --write
 验收标准：
 
 - Codex 能生成适合手机阅读的飞书单篇文章和精选索引页。
+- 精选索引页留在 `📱 my-mind 手机待读`，单篇文章进入 `20_资料库精选/` 对应主题目录。
 - 飞书页面保留本地来源路径和建议动作。
 - OpenClaw 能把飞书链接发送给用户。
 - 用户能基于飞书阅读内容回复短反馈。
