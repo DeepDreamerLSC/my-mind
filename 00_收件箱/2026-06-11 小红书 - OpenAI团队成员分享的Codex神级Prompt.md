@@ -10,7 +10,7 @@
 来源链接: "https://www.xiaohongshu.com/explore/6a1ae02f0000000035039635"
 原始链接: "http://xhslink.com/o/8NW3VFhRauu"
 内容编号: 6a1ae02f0000000035039635
-时长:
+时长: 不适用（图文）
 封面图: "http://sns-webpic-qc.xhscdn.com/202606112005/8968fabb8b1cf26ea573679e6de00cb1/notes_pre_post/1040g3k8320pfoqdn6o705p8eoufln4v6uvggnq0!nd_prv_wlteh_jpg_3"
 点赞数: 115
 评论数: 1
@@ -23,15 +23,16 @@
 质量门禁: 已具备可读摘录和图片 OCR，可进入分拣和前台阅读候选。
 外部转录链接:
 外部转录来源:
-字幕来源:
-字幕语言:
-内容摘录来源:
-内容摘录后端:
-内容摘录字数:
+字幕来源: 不适用（图文）
+字幕语言: 不适用（图文）
+内容摘录来源: 小红书公开页面文案摘录
+内容摘录后端: XiaoHongShu HTML
+内容摘录字数: 343
 图片OCR来源: 小红书公开图片 OCR
 图片OCR后端: PaddleOCR-VL
 图片OCR模型: PaddleOCR-VL-1.6
 图片OCR字数: 322
+阅读状态: 已读
 处理状态: 已分拣
 关联项目:
   - 个人数据资产系统
@@ -52,7 +53,7 @@
 - 作者编号：650ec79f00000000160393e6
 - 作者主页：https://www.xiaohongshu.com/user/profile/650ec79f00000000160393e6
 - 发布时间：2026-05-30
-- 时长：未知
+- 时长：不适用（图文）
 - 来源链接：https://www.xiaohongshu.com/explore/6a1ae02f0000000035039635
 - 内容编号：6a1ae02f0000000035039635
 - 缩略图：http://sns-webpic-qc.xhscdn.com/202606112005/8968fabb8b1cf26ea573679e6de00cb1/notes_pre_post/1040g3k8320pfoqdn6o705p8eoufln4v6uvggnq0!nd_prv_wlteh_jpg_3
@@ -166,10 +167,10 @@ OpenAI总裁、联合创始人Greg Brockman也转发过。
 ## 字幕可用性
 
 ### 手动字幕
-- 未发现
+- 不适用（图文）
 
 ### 自动字幕
-- 未发现
+- 不适用（图文）
 
 ## 为什么保存
 
@@ -181,7 +182,7 @@ OpenAI总裁、联合创始人Greg Brockman也转发过。
 
 ## 阅读思考
 
-- 待阅读后补充。
+- 已读，待补充读后判断。
 - 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。
 - 如果和 Codex 交流过，可把交流后的新判断补在这里。
 

@@ -10,7 +10,7 @@
 来源链接: "https://www.xiaohongshu.com/explore/6a21650b000000000702651f"
 原始链接: "http://xhslink.com/o/7ZGjSx5sdPA"
 内容编号: 6a21650b000000000702651f
-时长: 
+时长: 不适用（图文）
 封面图: "http://sns-webpic-qc.xhscdn.com/202606101258/dd8e30ab8437743384f54f1d663250e2/notes_pre_post/1040g3k032109k4j87u005pdcv9m3gf3o00eki1o!nd_prv_wlteh_jpg_3"
 点赞数: 21
 评论数: 3
@@ -23,15 +23,16 @@
 质量门禁: 已具备文案摘录和图片 OCR，可进入分拣和前台阅读候选。
 外部转录链接: 
 外部转录来源: 
-字幕来源: 
-字幕语言: 
-内容摘录来源:
-内容摘录后端:
-内容摘录字数:
+字幕来源: 不适用（图文）
+字幕语言: 不适用（图文）
+内容摘录来源: 小红书公开页面文案摘录
+内容摘录后端: XiaoHongShu HTML
+内容摘录字数: 758
 图片OCR来源: 小红书公开图片 OCR
 图片OCR后端: PaddleOCR
 图片OCR模型: PP-OCRv5_server_det+PP-OCRv5_server_rec
 图片OCR字数: 357
+阅读状态: 已读
 处理状态: 已分拣
 关联项目:
   - 个人数据资产系统
@@ -55,7 +56,7 @@
 - 作者编号：65acfa6c000000000e003c78
 - 作者主页：https://www.xiaohongshu.com/user/profile/65acfa6c000000000e003c78
 - 发布时间：2026-06-04
-- 时长：未知
+- 时长：不适用（图文）
 - 来源链接：https://www.xiaohongshu.com/explore/6a21650b000000000702651f
 - 内容编号：6a21650b000000000702651f
 - 缩略图：http://sns-webpic-qc.xhscdn.com/202606101258/dd8e30ab8437743384f54f1d663250e2/notes_pre_post/1040g3k032109k4j87u005pdcv9m3gf3o00eki1o!nd_prv_wlteh_jpg_3
@@ -173,10 +174,10 @@ squad_lead
 ## 字幕可用性
 
 ### 手动字幕
-- 未发现
+- 不适用（图文）
 
 ### 自动字幕
-- 未发现
+- 不适用（图文）
 
 ## 为什么保存
 
@@ -188,7 +189,7 @@ squad_lead
 
 ## 阅读思考
 
-- 待阅读后补充。
+- 已读，待补充读后判断。
 - 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。
 - 如果和 Codex 交流过，可把交流后的新判断补在这里。
 

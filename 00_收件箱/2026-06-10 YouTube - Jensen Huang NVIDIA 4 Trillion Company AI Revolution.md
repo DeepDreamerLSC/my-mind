@@ -4,20 +4,24 @@
 来源平台: YouTube
 标题: "Jensen Huang: NVIDIA - The $4 Trillion Company & the AI Revolution | Lex Fridman Podcast #494"
 作者或频道: Lex Fridman
-发布时间: 
+发布时间: 2026-03-23
 捕获时间: "2026-06-10 10:44:50 +0800"
 来源链接: "https://youtu.be/vif8NQcjVf0?si=3r2VsWthEdb7RYVQ"
 原始链接: "https://youtu.be/vif8NQcjVf0?si=3r2VsWthEdb7RYVQ"
-时长: 
+时长: "02:25:29"
 解析工具: yt-dlp
-解析器: YouTube oEmbed
+解析器: YouTube oEmbed + Lex transcript
 解析状态: 已解析
 内容质量: 需核验
-质量门禁: 已有外部转录来源，但收件箱未生成标准化正文级摘录字段；推送前建议先整理摘要。
+质量门禁: 已通过 Lex 官方 episode/transcript 页面补齐发布时间与时长；推送前建议抽核 1-2 个关键事实。
 外部转录链接: "https://lexfridman.com/jensen-huang-transcript"
 外部转录来源: Lex Fridman 官方 transcript
-字幕来源: 
-字幕语言: 
+字幕来源: Lex Fridman 官方 transcript
+字幕语言: en
+内容摘录来源: Lex Fridman 官方 transcript 结构化解析
+内容摘录后端: inbox-capture transcript parser
+内容摘录字数: 22281
+阅读状态: 已读
 处理状态: 已分拣
 关联项目:
   - 个人数据资产系统
@@ -40,15 +44,15 @@
 - 来源平台：YouTube
 - 作者或频道：Lex Fridman
 - 作者主页：https://www.youtube.com/@lexfridman
-- 发布时间：未知
-- 时长：未知
+- 发布时间：2026-03-23
+- 时长：02:25:29
 - 来源链接：https://youtu.be/vif8NQcjVf0?si=3r2VsWthEdb7RYVQ
 - 缩略图：https://i.ytimg.com/vi/vif8NQcjVf0/hqdefault.jpg
 - 解析状态：已解析
 
 ## 解析说明
 
-`yt-dlp` 解析被 YouTube 登录验证拦截；已通过 YouTube oEmbed 补充标题、作者和缩略图，并从视频描述中发现 Lex Fridman 官方转录页。
+`yt-dlp` 解析被 YouTube 登录验证拦截；已通过 YouTube oEmbed 补充标题、作者和缩略图，再通过 Lex Fridman 官方 episode/transcript 页面补齐发布时间、时长与英文转录来源。
 
 原始 `yt-dlp` 失败原因：
 
@@ -56,11 +60,11 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 
 ## 简介摘录
 
-暂无。
+本期对话围绕 NVIDIA 如何把 AI 计算做成全栈系统工程展开，核心话题覆盖 scaling laws、供应链、电力、CUDA 护城河，以及 Jensen Huang 对领导力和未来编程方式的判断。
 
 ## YouTube 字幕解析说明
 
-已尝试 YouTube 字幕/内置 transcript 路径，但当前环境仍被 YouTube 校验拦截；本条内容最终通过视频描述中的 Lex Fridman 官方 transcript 链接完成内容级解析。
+已尝试 YouTube 字幕/内置 transcript 路径，但当前环境仍被 YouTube 校验拦截；本条内容最终通过视频描述中的 Lex Fridman 官方 transcript 链接完成内容级解析，并以该官方来源替代 YouTube 内置字幕信息。
 
 ## 官方转录来源
 
@@ -97,9 +101,12 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 - 2:11:01 - Consciousness
 - 2:17:22 - Mortality
 
-## 初步内容解析
+## 摘要
 
-- 核心主题：Jensen Huang 从 NVIDIA 的系统工程、AI scaling laws、供应链、能源、CUDA 护城河、全球科技生态和领导压力等角度，解释为什么 AI 计算正在从单机芯片问题变成“AI 工厂”和全栈系统问题。
+Jensen Huang 从 NVIDIA 的系统工程、AI scaling laws、供应链、能源、CUDA 护城河、全球科技生态和领导压力等角度，解释为什么 AI 计算正在从单机芯片问题变成“AI 工厂”和全栈系统问题。
+
+## 关键点
+
 - 极限协同设计：AI 训练和推理的瓶颈不再只是 GPU，而是算法、模型切分、网络、内存、功耗、散热、软件、机柜、数据中心之间的联合优化。
 - 公司运行方式：Jensen 将 NVIDIA 描述为跨学科、高密度协作的系统工程组织，重点不是连续小改进，而是用第一性原理逼近每个环节的物理极限。
 - AI scaling laws：他认为 scaling 没有结束，只是从预训练扩展到后训练、测试时计算和智能体扩展；合成数据、推理计算和 agentic workflows 会继续推动需求。
@@ -144,7 +151,7 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 ## 字幕可用性
 
 ### 手动字幕
-- 未发现
+- Lex Fridman 官方 transcript（英文）
 
 ### 自动字幕
 - 未发现
@@ -159,15 +166,19 @@ ERROR: [youtube] vif8NQcjVf0: Sign in to confirm you’re not a bot. Use --cooki
 
 ## 阅读思考
 
-- 待阅读后补充。
+- 已读，待补充读后判断。
 - 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。
 - 如果和 Codex 交流过，可把交流后的新判断补在这里。
 
 ## 后续处理建议
 
 - 判断是否需要进入资料库。
-- 如果有字幕或后续转写，再进行摘要、关键观点和待验证事实提取。
+- 可基于官方 transcript 继续核对待验证事实，并补充阅读思考。
 - 如果与项目相关，再萃取到项目上下文、任务清单或问题清单。
+
+## 分拣记录
+
+- 2026-06-13：门禁复核已补齐发布时间、时长和 transcript 来源；当前保留 `需核验`，仅因原始 YouTube 页面仍被登录验证拦截，建议前台推送前抽核 1-2 个关键事实。
 
 ## 原始链接
 
