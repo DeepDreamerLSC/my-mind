@@ -22,6 +22,8 @@
 最常见的使用方式不是手写 Markdown，而是把链接、片段或想法丢给 OpenClaw 或 Codex：
 
 ```text
+入库：https://example.com/article
+入库：这段内容值得沉淀...
 入箱：https://example.com/article
 入箱：抖音/小红书/YouTube/X 分享链接
 记录前台反馈：1 已读：这条对我有用，后面想沉淀成 Codex 工作流
@@ -40,13 +42,17 @@ cd /Users/linsuchang/Desktop/work/my-mind
 
 ## 日常流程
 
-1. 收集
+1. 收集或入库
 
 把 YouTube、抖音、小红书、X、网页链接或原始片段丢进收件箱。系统会尽量抓取标题、作者、发布时间、封面、正文、文案、字幕、互动数据和视频转写。
 
-2. 门禁和分拣
+如果你说“入箱”，系统只保存原始材料，后续等分拣和阅读反馈；如果你说“入库”，系统仍会先入箱保存证据链，但会继续自动分拣并尽量生成资料库、提示词库或候选洞察草稿。
+
+2. 门禁、分拣和候选沉淀
 
 Codex 会检查入箱内容是否解析充分，标记 `内容质量`，再刷新 `05_流转区/` 的待读、待沉淀、待核验和暂缓队列。
+
+`入库` 流程会进一步生成候选知识，默认标记为 `处理状态: 候选`、`吸收状态: 待确认`。这还不是最终“化为己有”的知识。
 
 3. 前台推送
 
@@ -102,6 +108,43 @@ python3 .codex/skills/inbox-capture/scripts/capture_link.py \
   --no-extract-content \
   "https://v.douyin.com/..."
 ```
+
+### 入库
+
+`入库` 是上层编排：先调用入箱能力保存原始材料，再分拣、生成候选知识和确认问题清单。
+
+预览：
+
+```bash
+python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
+  "https://example.com/article"
+```
+
+真实入库：
+
+```bash
+python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
+  --write \
+  "https://example.com/article"
+```
+
+处理已有收件箱来源：
+
+```bash
+python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py \
+  --write \
+  --source "00_收件箱/某条笔记.md"
+```
+
+常用目标：
+
+```bash
+python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py --write --target library --source "00_收件箱/..."
+python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py --write --target prompt --source "00_收件箱/..."
+python3 .codex/skills/knowledge-intake/scripts/knowledge_intake.py --write --target insight --source "00_收件箱/..."
+```
+
+运行结果会写入 `85_运行记录/入库处理-*.md`，并把候选回链追加到来源笔记的 `沉淀记录`。解析不足、未读或敏感状态不明时，只生成确认问题，不硬写长期知识。候选资料默认暂停飞书精选同步，确认后再开启。
 
 ### 分拣收件箱
 
@@ -369,7 +412,9 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 OpenClaw 适合做前台秘书：
 
 - 接收你从手机复制来的链接或片段。
-- 调用入箱技能，把内容写入 `00_收件箱/`。
+- 你说“入箱”时，只调用入箱技能，把内容写入 `00_收件箱/`。
+- 你说“入库”时，调用 `knowledge-intake`，先入箱，再推进到候选知识和确认问题清单。
+- 当前 OpenClaw 原生 `openclaw skills list` 不会自动发现项目内 `.codex/skills/knowledge-intake`；本机 OpenClaw workspace 已补薄入口 `my-mind-knowledge-intake`，实际仍调用本仓库脚本，避免两套实现分叉。
 - 调用 `build_openclaw_feishu_message.py` 读取最新飞书知识库链接，必要时拆分成多条短消息推给你。
 - 收集你的短反馈，并追加到 `85_运行记录/前台反馈队列.jsonl`。
 - 不直接判断长期知识结构，不直接改写资料库正文。
@@ -440,6 +485,9 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 - 收件箱是入口，不是长期知识。
 - 流转区是行动视图，不是事实源。
 - 运行记录是审计材料，不是长期知识。
+- 待读内容是输入判断，不代表认可。
+- 待沉淀内容是候选加工队列，不代表已经化为己有。
+- 化为己有的内容必须进入 `20_资料库/`、`30_原子笔记/`、`65_洞察/`、`75_提示词库/` 等长期目录，并经过确认、复用或同步。
 - 未经确认的内容不自动晋升为原子笔记、洞察或提示词。
 - 外部来源摘要可以进入收件箱，但进入长期知识前需要信达雅的中文整理和必要核验。
 - 自动化可以整理、提醒和准备候选，但最终哪些内容代表你的知识资产，要以你的阅读反馈和后续使用价值为准。
