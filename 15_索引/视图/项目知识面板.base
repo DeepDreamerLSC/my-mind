@@ -47,7 +47,7 @@ views:
     name: 项目工作台
     filters:
       and:
-        - 'file.inFolder("10_项目/个人数据资产系统")'
+        - 'file.inFolder("10_项目")'
     order:
       - file.name
       - 'note["项目状态"]'

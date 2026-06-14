@@ -1,7 +1,7 @@
 ﻿记录键,生成时间,自动化,状态,频率,原始频率,模型,推理强度,执行环境,配置路径,错误
-automation:收件箱待分拣巡检,2026-06-14 13:16:22 +0800,收件箱待分拣巡检,ACTIVE,每 6 小时,FREQ=HOURLY;INTERVAL=6,gpt-5.4,xhigh,local,/Users/linsuchang/.codex/automations/automation/automation.toml,
-automation:收件箱入箱门禁审核,2026-06-14 13:16:22 +0800,收件箱入箱门禁审核,ACTIVE,每 6 小时,FREQ=HOURLY;INTERVAL=6,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-2/automation.toml,
-automation:前沿情报每日入箱,2026-06-14 13:16:22 +0800,前沿情报每日入箱,ACTIVE,每天 06:20,FREQ=DAILY;BYHOUR=6;BYMINUTE=20;BYSECOND=0,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-3/automation.toml,
-automation:项目进展每日巡检,2026-06-14 13:16:22 +0800,项目进展每日巡检,ACTIVE,每天 20:30,FREQ=DAILY;BYHOUR=20;BYMINUTE=30;BYSECOND=0,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-4/automation.toml,
-automation:前台反馈与待确认消费,2026-06-14 13:16:22 +0800,前台反馈与待确认消费,ACTIVE,每 6 小时,FREQ=HOURLY;INTERVAL=6,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-5/automation.toml,
-automation:飞书仪表盘每日同步,2026-06-14 13:16:22 +0800,飞书仪表盘每日同步,ACTIVE,每天 07:00,"FREQ=DAILY;BYHOUR=7,14,21;BYMINUTE=0;BYSECOND=0",gpt-5.4,medium,local,/Users/linsuchang/.codex/automations/automation-6/automation.toml,
+automation:收件箱待分拣巡检,2026-06-14 23:17:52 +0800,收件箱待分拣巡检,ACTIVE,每 6 小时,FREQ=HOURLY;INTERVAL=6,gpt-5.4,xhigh,local,/Users/linsuchang/.codex/automations/automation/automation.toml,
+automation:收件箱入箱门禁审核,2026-06-14 23:17:52 +0800,收件箱入箱门禁审核,ACTIVE,每 6 小时,FREQ=HOURLY;INTERVAL=6,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-2/automation.toml,
+automation:前沿情报每日入箱,2026-06-14 23:17:52 +0800,前沿情报每日入箱,ACTIVE,每天 06:20,FREQ=DAILY;BYHOUR=6;BYMINUTE=20;BYSECOND=0,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-3/automation.toml,
+automation:项目组合每日巡检,2026-06-14 23:17:52 +0800,项目组合每日巡检,ACTIVE,每天 20:30,FREQ=DAILY;BYHOUR=20;BYMINUTE=30;BYSECOND=0,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-4/automation.toml,
+automation:前台反馈与待确认消费,2026-06-14 23:17:52 +0800,前台反馈与待确认消费,ACTIVE,每 6 小时,FREQ=HOURLY;INTERVAL=6,gpt-5.4,high,local,/Users/linsuchang/.codex/automations/automation-5/automation.toml,
+automation:飞书仪表盘每日同步,2026-06-14 23:17:52 +0800,飞书仪表盘每日同步,ACTIVE,每天 07:00,"FREQ=DAILY;BYHOUR=7,14,21;BYMINUTE=0;BYSECOND=0",gpt-5.4,medium,local,/Users/linsuchang/.codex/automations/automation-6/automation.toml,
