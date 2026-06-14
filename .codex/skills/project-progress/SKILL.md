@@ -17,7 +17,7 @@ Use this skill to turn engineering evidence into project progress candidates and
    python3 .codex/skills/project-progress/scripts/project_progress.py --write
    ```
 
-2. Review `85_运行记录/项目进展巡检-*.md`.
+2. Review `85_运行记录/项目进展巡检-<project>-*.md`.
 
 3. If the user confirms the candidate, append it to project files:
 
@@ -39,7 +39,7 @@ Use this skill to turn engineering evidence into project progress candidates and
 
 - recent git commits;
 - current working tree changes;
-- recently modified run records;
+- project-related run records;
 - project front matter and status files.
 
 The report must include `Codex 项目分析`:
@@ -57,8 +57,16 @@ Useful commands:
 ```bash
 python3 .codex/skills/project-progress/scripts/project_progress.py --dry-run
 python3 .codex/skills/project-progress/scripts/project_progress.py --write
+python3 .codex/skills/project-progress/scripts/project_progress.py --write --project edu-agent
 python3 .codex/skills/project-progress/scripts/project_progress.py --write --since-hours 48
 python3 .codex/skills/project-progress/scripts/project_progress.py --write --apply
 ```
 
 Automation should run `--write` only.
+
+## Managed projects
+
+- `my-mind` / `个人数据资产系统`：默认项目，扫描当前知识库仓库。
+- `edu-agent`：扫描 `/Users/linsuchang/Desktop/work/edu-agent`，把候选进展写入 `10_项目/edu-agent/`。
+
+When a project has an external code repository, keep generated reports in `85_运行记录/` and write only confirmed project conclusions into `10_项目/<项目>/`.

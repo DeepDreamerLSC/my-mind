@@ -53,6 +53,8 @@ python3 .codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py \
   "前三条已读，但内容简略，没什么价值"
 ```
 
+如果一句话同时包含数量和“全部”，以显式数量为准。例如“3 条链接全部超时”只展开 3 条，不会扩成当前推送文件里的所有条目。
+
 ## 消费队列
 
 预览待处理反馈，不写文件：

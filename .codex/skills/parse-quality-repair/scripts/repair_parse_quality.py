@@ -26,6 +26,7 @@ TRIAGE_SCRIPT = ROOT / ".codex/skills/inbox-triage/scripts/triage_inbox.py"
 
 TERMINAL_STATUSES = {"已处理", "已晋升", "已归档", "可丢弃"}
 LOW_QUALITY_VALUES = {"需核验", "需继续解析", "解析失败", "部分解析"}
+TRUNCATED_MARKERS = ("摘录已截断", "仍包含截断", "[…]", "...", "…")
 SECTION_HEADINGS = [
     "中文摘要",
     "摘要",
@@ -214,6 +215,25 @@ def source_excerpt(note: Note, limit: int = 3000) -> str:
     return re.sub(r"\s+", " ", text).strip()[:limit]
 
 
+def has_truncated_or_summary_only_source(note: Note) -> bool:
+    source_kind = str(note.frontmatter.get("内容摘录来源") or "")
+    body = note.body
+    original_excerpt = extract_section(body, "原文摘录")
+    has_rss_summary = "RSS/Atom" in source_kind
+    has_full_video = bool(extract_section(body, "视频内容摘录") and "转写摘录" in extract_section(body, "视频内容摘录"))
+    has_ocr = bool(extract_section(body, "图片文字 OCR") and str(note.frontmatter.get("图片OCR字数") or "").strip())
+    has_copy = len(extract_section(body, "文案摘录")) >= 180
+    has_article = len(extract_section(body, "正文") or extract_section(body, "文章正文")) >= 500
+    has_truncated_marker = any(marker in original_excerpt for marker in TRUNCATED_MARKERS) or any(
+        marker in body for marker in ("摘录已截断", "仍包含截断")
+    )
+    if has_rss_summary and not (has_full_video or has_ocr or has_copy or has_article):
+        return True
+    if has_truncated_marker and not (has_full_video or has_ocr or has_copy or has_article):
+        return True
+    return False
+
+
 def normalize_text(text: str) -> tuple[str, list[str]]:
     updated = text.translate(TRADITIONAL_TO_SIMPLIFIED)
     actions: list[str] = []
@@ -266,6 +286,8 @@ def note_needs_repair(note: Note, include_terminal: bool) -> bool:
     combined = f"{note.text}\n{note.quality}\n{note.parse_status}"
     if note.quality in LOW_QUALITY_VALUES or note.parse_status in LOW_QUALITY_VALUES:
         return True
+    if has_truncated_or_summary_only_source(note):
+        return True
     if "tiny 模型" in combined or "small 模型" in combined:
         return True
     if any(re.search(pattern, combined, flags=re.I) for pattern, _ in TERM_REPLACEMENTS):
@@ -291,6 +313,8 @@ def assess_blockers(note: Note, text: str) -> list[str]:
         blockers.append(f"解析状态为「{note.parse_status}」，需要补抓来源或补充正文证据。")
     if note.quality == "需继续解析":
         blockers.append("内容质量为「需继续解析」，不能自动标记为可推送。")
+    if has_truncated_or_summary_only_source(note):
+        blockers.append("来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。")
     if "内容摘录来源: \"\"" in text or "内容摘录来源: ''" in text:
         blockers.append("内容摘录来源为空，需要确认是否真的完成视频/正文解析。")
     if re.search(r"待补充[。.]|暂无[。.]|解析失败", excerpt):

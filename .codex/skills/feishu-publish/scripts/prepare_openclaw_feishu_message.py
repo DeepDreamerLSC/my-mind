@@ -56,7 +56,11 @@ def build_message_args(args: argparse.Namespace, push_file: str) -> list[str]:
         str(max(0, args.message_max_items)),
         "--summary-chars",
         str(max(0, args.summary_chars)),
+        "--confirmation-max-items",
+        str(max(0, args.confirmation_max_items)),
     ]
+    if args.confirmation_file:
+        command.extend(["--confirmation-file", args.confirmation_file])
     if args.chunk_size > 0:
         command.extend(["--chunk-size", str(args.chunk_size)])
     if args.json:
@@ -85,6 +89,8 @@ def publish_args(args: argparse.Namespace, push_file: str, *, dry_run: bool) -> 
             command.extend([key, value])
     if args.no_auto_item_parent_map:
         command.append("--no-auto-item-parent-map")
+    if args.include_incomplete:
+        command.append("--include-incomplete")
     return command
 
 
@@ -100,6 +106,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--publish-max-items", type=int, default=0, help="Maximum items to publish. 0 means all.")
     parser.add_argument("--message-max-items", type=int, default=3, help="Maximum item highlights in OpenClaw message.")
     parser.add_argument("--summary-chars", type=int, default=90, help="Maximum summary characters per highlighted item.")
+    parser.add_argument("--confirmation-file", default="", help="OpenClaw reminder markdown that contains 待确认候选.")
+    parser.add_argument("--confirmation-max-items", type=int, default=2, help="Maximum confirmation items appended to the OpenClaw message. 0 disables.")
     parser.add_argument("--chunk-size", type=int, default=0, help="Split final message into chunks. 0 disables splitting.")
     parser.add_argument("--json", action="store_true", help="Output final OpenClaw message as structured JSON.")
     parser.add_argument("--publish-command", default="", help="Override Feishu create command.")
@@ -109,6 +117,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--item-wiki-parent-node-token", default="", help="Target parent wiki node token for item pages.")
     parser.add_argument("--item-parent-map", default="", help="Optional JSON map for per-item target wiki directories.")
     parser.add_argument("--no-auto-item-parent-map", action="store_true", help="Disable per-item target wiki directory inference.")
+    parser.add_argument("--include-incomplete", action="store_true", help="Allow publishing items blocked by the Feishu completeness gate.")
     parser.add_argument("--wiki-move-command", default="", help="Override wiki move command.")
     return parser.parse_args()
 

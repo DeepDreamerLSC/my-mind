@@ -38,7 +38,7 @@ HIGH_KEYWORDS = [
 ]
 MEDIUM_KEYWORDS = ["人工智能", "ai", "管理", "项目", "知识", "复盘", "资料库", "原子笔记"]
 TERMINAL_STATUSES = {"已处理", "已晋升", "可丢弃", "已归档"}
-LOW_QUALITY_STATUSES = {"需继续解析"}
+LOW_QUALITY_STATUSES = {"需继续解析", "需核验"}
 PROMOTED_STATUSES = {"正式", "已处理"}
 PROMOTED_ABSORPTION_STATUSES = {"已吸收", "已应用"}
 PROMOTION_ROOTS = [
@@ -768,7 +768,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--limit", type=int, default=0, help="Maximum pushed inbox items. Use 0 to include all candidates.")
     parser.add_argument("--excerpt-chars", type=int, default=1200, help="Maximum reading excerpt characters per item.")
     parser.add_argument("--cooldown-hours", type=int, default=24, help="Skip items pushed without feedback within this many hours. Use 0 to disable.")
-    parser.add_argument("--include-low-quality", action="store_true", help="Include notes marked 内容质量=需继续解析.")
+    parser.add_argument("--include-low-quality", action="store_true", help="Include notes marked 内容质量=需继续解析 or 需核验.")
     parser.add_argument("--include-promoted", action="store_true", help="Include inbox notes that already have promoted long-term knowledge.")
     parser.add_argument("--force", action="store_true", help="Ignore push cooldown.")
     parser.add_argument("--no-state", action="store_true", help="Do not read or update push state.")

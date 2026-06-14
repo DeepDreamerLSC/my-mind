@@ -232,8 +232,6 @@ def chinese_number_to_int(value: str) -> int | None:
 
 
 def requested_batch_count(text: str, default: int) -> int:
-    if re.search(r"全部|所有|全量|都", text):
-        return default
     numbered = re.findall(r"(?m)^\s*\d+[\.\)、:：\s-]+", text)
     if len(numbered) > 1:
         return min(len(numbered), default)
@@ -253,6 +251,8 @@ def requested_batch_count(text: str, default: int) -> int:
             count = chinese_number_to_int(match.group(1))
             if count:
                 return min(count, default)
+    if re.search(r"全部|所有|全量|都", text):
+        return default
     return 0
 
 

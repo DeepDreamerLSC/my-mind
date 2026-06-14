@@ -56,7 +56,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 ## 检查范围
 
 - Codex App 自动化配置和频率。
-- `05_流转区/` 的待读、待沉淀、待核验数量。
+- `05_流转区/` 的待读、待沉淀、待核验数量；待沉淀会继续拆成可消费、已有候选待确认、待补判断三类，避免把已生成候选的内容重复沉淀。
 - `00_收件箱/` 的处理状态、解析质量和低质量条目；已归档且明确为重复证据的低质量条目不计入活跃异常。
 - `parse-quality-repair` 的最近运行记录和待核验修复状态。
 - `85_运行记录/前台反馈队列.jsonl` 的待处理反馈。
@@ -69,6 +69,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 
 - 先给总览，再列证据。
 - 把动作分成“需要用户处理”“Codex 后台应处理”“OpenClaw 前台应提醒”。
+- 待沉淀总数只代表流转区存量；只有“待沉淀可消费”才表示 Codex 应继续自动生成候选。
 - 固定总览要覆盖写入，避免用户翻多份历史自动化报告。
 - 不删除文件，不改收件箱，不生成候选沉淀。
 - 若发现待处理反馈，建议优先运行 `frontdesk-feedback` 的消费脚本。

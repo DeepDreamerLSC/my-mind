@@ -38,6 +38,7 @@ The script scans `00_收件箱` for notes with low-quality parse signals:
 - `解析状态: 解析失败` or `部分解析`
 - tiny/small transcription warning text
 - obvious term recognition mistakes
+- RSS/Atom summary-only captures, truncated excerpts, or source blocks that are too short to support mobile reading
 
 It automatically performs only low-risk repairs:
 
@@ -45,6 +46,7 @@ It automatically performs only low-risk repairs:
 - Normalize obvious tool/company names such as `Codex`, `Claude Code`, `Anthropic`, `OpenAI`, `OpenClaw`, and `MCP`.
 - Fill or tighten `内容质量` and `质量门禁` when the note has enough readable evidence.
 - Append `## 解析修复记录` to the source note.
+- Mark summary-only or truncated sources as `内容质量: 需核验` and keep them out of frontdesk push, Feishu publish, and candidate promotion.
 
 It does not redownload media, run long transcriptions, or promote knowledge in v1. Items needing heavy work remain in the repair queue.
 

@@ -22,6 +22,8 @@ DEFAULT_RUN_DIR = base.DEFAULT_RUN_DIR
 DEFAULT_DRAFT_DIR = DEFAULT_RUN_DIR / "飞书精选页"
 DEFAULT_RECORD_FILE = base.DEFAULT_RECORD_FILE
 DEFAULT_ITEM_PARENT_MAP = DEFAULT_RUN_DIR / "飞书知识库目录映射.local.json"
+DEFAULT_GATE_QUEUE = ROOT / "05_流转区/40_待核验/飞书发布待补全队列.md"
+DEFAULT_GATE_REPORT_DIR = DEFAULT_RUN_DIR
 DEFAULT_CREATE_COMMAND = (
     'OPENCLAW_HOME="$HOME/.openclaw" lark-cli docs +create '
     "--api-version v2 --wiki-space my_library --title {title} --doc-format markdown --content @{markdown_file_rel}"
@@ -31,6 +33,21 @@ DEFAULT_UPDATE_COMMAND = (
     "--api-version v2 --doc {page_token} --command overwrite --doc-format markdown --new-title {title} --content @{markdown_file_rel}"
 )
 
+INTERNAL_SOURCE_HEADINGS = (
+    "为什么保存",
+    "初步想法",
+    "阅读思考",
+    "后续处理建议",
+    "分拣记录",
+    "沉淀记录",
+    "入库记录",
+    "解析修复记录",
+    "原始链接",
+)
+INCOMPLETE_QUALITY_VALUES = {"需继续解析", "需核验", "解析失败", "部分解析"}
+INCOMPLETE_PARSE_STATUSES = {"解析失败", "部分解析"}
+SECTION_STOP_PATTERN = re.compile(r"^#{1,6}\s+", flags=re.M)
+
 
 def clean_title(title: str, max_chars: int = 90) -> str:
     value = re.sub(r"\s+", " ", title).strip()
@@ -38,6 +55,10 @@ def clean_title(title: str, max_chars: int = 90) -> str:
     if len(value) <= max_chars:
         return value
     return value[: max_chars - 1].rstrip() + "…"
+
+
+def now_filename() -> str:
+    return dt.datetime.now(TZ).strftime("%Y-%m-%d-%H%M")
 
 
 def stable_item_draft_path(directory: Path, item: base.PushItem) -> Path:
@@ -239,7 +260,244 @@ def infer_item_parent(item: base.PushItem, parent_map: dict[str, str]) -> tuple[
     return "", "", "未配置目录映射"
 
 
-def render_item_page(item: base.PushItem, push_path: Path, generated_at: str) -> str:
+def strip_front_matter(text: str) -> str:
+    if not text.startswith("---"):
+        return text
+    match = re.match(r"^---\s*\n.*?\n---\s*\n?", text, flags=re.S)
+    return text[match.end() :] if match else text
+
+
+def parse_simple_frontmatter(text: str) -> dict[str, str]:
+    if not text.startswith("---"):
+        return {}
+    match = re.match(r"^---\s*\n(.*?)\n---\s*\n?", text, flags=re.S)
+    if not match:
+        return {}
+    meta: dict[str, str] = {}
+    for raw_line in match.group(1).splitlines():
+        if not raw_line.strip() or raw_line.startswith(" "):
+            continue
+        if ":" not in raw_line:
+            continue
+        key, value = raw_line.split(":", 1)
+        meta[key.strip()] = value.strip().strip('"')
+    return meta
+
+
+def strip_leading_h1(text: str) -> str:
+    return re.sub(r"^# .+?\n+", "", text.lstrip(), count=1)
+
+
+def cut_before_internal_sections(text: str) -> str:
+    earliest = len(text)
+    for heading in INTERNAL_SOURCE_HEADINGS:
+        match = re.search(rf"^## {re.escape(heading)}\s*$", text, flags=re.M)
+        if match:
+            earliest = min(earliest, match.start())
+    return text[:earliest].strip()
+
+
+def demote_markdown_headings(text: str) -> str:
+    return re.sub(r"^(#{1,5})(\s+)", r"#\1\2", text, flags=re.M)
+
+
+def section_text(body: str, heading: str) -> str:
+    match = re.search(rf"^## {re.escape(heading)}\s*$", body, flags=re.M)
+    if not match:
+        return ""
+    start = match.end()
+    next_match = SECTION_STOP_PATTERN.search(body, start)
+    end = next_match.start() if next_match else len(body)
+    return body[start:end].strip()
+
+
+def int_meta(meta: dict[str, str], key: str) -> int:
+    match = re.search(r"\d+", str(meta.get(key) or ""))
+    return int(match.group(0)) if match else 0
+
+
+def has_truncation_marker(text: str) -> bool:
+    return bool(re.search(r"摘录已截断|仍包含截断|全文稿|补全文稿|\[…\]|…|\.\.\.", text))
+
+
+def source_note_path(item: base.PushItem) -> Path | None:
+    source_file = item.source_file.strip()
+    if not source_file or source_file == "未知":
+        return None
+    path = resolve_path(source_file)
+    return path if path.exists() else None
+
+
+def assess_source_material(meta: dict[str, str], body: str, char_count: int) -> dict[str, object]:
+    blockers: list[str] = []
+    quality = str(meta.get("内容质量") or "")
+    parse_status = str(meta.get("解析状态") or "")
+    platform = str(meta.get("来源平台") or "")
+    source_kind = str(meta.get("内容摘录来源") or "")
+    excerpt_chars = int_meta(meta, "内容摘录字数")
+    ocr_chars = int_meta(meta, "图片OCR字数")
+
+    video_section = section_text(body, "视频内容摘录")
+    ocr_section = section_text(body, "图片文字 OCR")
+    copy_section = section_text(body, "文案摘录")
+    original_section = section_text(body, "原文摘录")
+    article_section = section_text(body, "正文") or section_text(body, "文章正文")
+
+    has_video_transcript = bool(video_section and "转写摘录" in video_section and excerpt_chars >= 120)
+    has_ocr = bool(ocr_section and ocr_chars >= 80)
+    has_platform_copy = bool(copy_section and len(copy_section) >= 180)
+    has_article_body = bool(article_section and len(article_section) >= 500)
+    has_original_excerpt = bool(original_section and len(original_section) >= 500 and not has_truncation_marker(original_section))
+    has_official_reference = bool(section_text(body, "官方转录来源") and section_text(body, "章节目录"))
+    ready_signal = (
+        has_video_transcript
+        or has_ocr
+        or has_platform_copy
+        or has_article_body
+        or has_original_excerpt
+        or has_official_reference
+    )
+
+    if not body.strip() or char_count < 180:
+        blockers.append("来源笔记可发布正文不足 180 字。")
+    if quality in INCOMPLETE_QUALITY_VALUES:
+        blockers.append(f"内容质量为「{quality}」。")
+    if parse_status in INCOMPLETE_PARSE_STATUSES:
+        blockers.append(f"解析状态为「{parse_status}」。")
+    if not ready_signal:
+        blockers.append("未发现完整正文、平台文案、OCR、视频转写或官方转录来源。")
+    if has_truncation_marker(original_section or body) and not (has_video_transcript or has_ocr or has_platform_copy or has_article_body):
+        blockers.append("来源仍包含截断摘录，需要继续解析后再进入飞书精选。")
+    if "RSS/Atom" in source_kind and not (has_video_transcript or has_ocr or has_article_body or has_official_reference):
+        blockers.append("当前只有 RSS/Atom 摘要，不足以作为手机阅读正本。")
+
+    blockers = sorted(set(blockers))
+    evidence: list[str] = []
+    if has_video_transcript:
+        evidence.append("视频转写")
+    if has_ocr:
+        evidence.append("图片 OCR")
+    if has_platform_copy:
+        evidence.append("平台文案")
+    if has_article_body:
+        evidence.append("文章正文")
+    if has_original_excerpt:
+        evidence.append("完整原文摘录")
+    if has_official_reference:
+        evidence.append("官方转录来源")
+    return {
+        "ready": not blockers,
+        "status": "可发布正本" if not blockers else "需继续解析",
+        "blockers": blockers,
+        "evidence": evidence,
+        "platform": platform,
+        "quality": quality,
+        "parse_status": parse_status,
+    }
+
+
+def source_material_warning(assessment: dict[str, object]) -> str:
+    blockers = assessment.get("blockers")
+    if isinstance(blockers, list) and blockers:
+        return "；".join(str(blocker) for blocker in blockers)
+    return ""
+
+
+def load_source_material(item: base.PushItem) -> dict[str, object]:
+    path = source_note_path(item)
+    if not path:
+        return {
+            "status": "来源文件不存在",
+            "publish_status": "需继续解析",
+            "publish_ready": False,
+            "publish_blockers": ["来源文件不存在。"],
+            "publish_evidence": [],
+            "path": item.source_file,
+            "body": "",
+            "body_hash": "",
+            "char_count": 0,
+            "warning": "来源文件不存在。",
+        }
+    raw = base.read_text(path)
+    meta = parse_simple_frontmatter(raw)
+    body = strip_front_matter(raw)
+    body = strip_leading_h1(body)
+    body = cut_before_internal_sections(body)
+    assessment_body = body.strip()
+    body = demote_markdown_headings(assessment_body).strip()
+    assessment = assess_source_material(meta, assessment_body, len(body))
+    return {
+        "status": "已接入来源正本" if body else "来源正本为空",
+        "publish_status": assessment["status"],
+        "publish_ready": bool(assessment["ready"]),
+        "publish_blockers": assessment["blockers"],
+        "publish_evidence": assessment["evidence"],
+        "path": base.repo_relative(path),
+        "body": body,
+        "body_hash": base.content_hash(body) if body else "",
+        "char_count": len(body),
+        "warning": source_material_warning(assessment),
+    }
+
+
+def render_gate_queue(blocked: list[tuple[base.PushItem, dict[str, object]]], push_path: Path) -> str:
+    lines = [
+        "# 飞书发布待补全队列",
+        "",
+        "这里记录飞书精选发布前发现的正文不完整条目。它们不应进入手机精选索引，需先补正文、OCR、字幕或转写。",
+        "",
+        "## 总览",
+        "",
+        f"- 更新时间：{base.now_datetime()}",
+        f"- 来源推送：`{base.repo_relative(push_path)}`",
+        f"- 待补全数量：{len(blocked)}",
+        "",
+        "## 队列",
+        "",
+    ]
+    if not blocked:
+        lines.append("当前没有飞书发布待补全条目。")
+        return "\n".join(lines).rstrip() + "\n"
+    for index, (item, material) in enumerate(blocked, start=1):
+        blockers = material.get("publish_blockers") if isinstance(material.get("publish_blockers"), list) else []
+        lines.extend(
+            [
+                f"### {index}. {item.title}",
+                "",
+                f"- 来源文件：`{material.get('path') or item.source_file or '未知'}`",
+                f"- 飞书发布状态：{material.get('publish_status') or '未知'}",
+                f"- 已接入字数：{material.get('char_count') or 0}",
+                "- 待补全：",
+            ]
+        )
+        lines.extend(f"  - {blocker}" for blocker in blockers)
+        lines.extend(["", "- 建议：先执行继续解析或补充正文证据，再重新生成前台推送和飞书精选。", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def write_gate_outputs(
+    blocked: list[tuple[base.PushItem, dict[str, object]]],
+    *,
+    push_path: Path,
+    queue_path: Path,
+    report_dir: Path,
+) -> Path:
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    rendered = render_gate_queue(blocked, push_path)
+    queue_path.write_text(rendered, encoding="utf-8")
+    report_path = report_dir / f"飞书精选发布门禁-{now_filename()}.md"
+    report_path.write_text(rendered, encoding="utf-8")
+    return report_path
+
+
+def render_item_page(
+    item: base.PushItem,
+    push_path: Path,
+    generated_at: str,
+    source_material: dict[str, object] | None = None,
+) -> str:
+    material = source_material or load_source_material(item)
     lines = [
         f"# {item.title}",
         "",
@@ -272,6 +530,23 @@ def render_item_page(item: base.PushItem, push_path: Path, generated_at: str) ->
         lines.extend(["", "## 阅读时重点", "", item.questions])
     if item.quality:
         lines.extend(["", "## 质量提醒", "", item.quality])
+    material_body = str(material.get("body") or "").strip()
+    lines.extend(
+        [
+            "",
+            "## 原文与完整解析",
+            "",
+            f"- 来源笔记：`{material.get('path') or item.source_file or '未知'}`",
+            f"- 接入状态：{material.get('status') or '未知'}",
+            f"- 正文字数：{material.get('char_count') or 0}",
+        ]
+    )
+    if material.get("warning"):
+        lines.append(f"- 完整性提醒：{material.get('warning')}")
+    if material_body:
+        lines.extend(["", material_body])
+    else:
+        lines.extend(["", "来源笔记暂未保存可发布的正文、OCR 或转写。请先对来源文件执行继续解析，再重新发布飞书精选。"])
     lines.extend(
         [
             "",
@@ -313,7 +588,7 @@ def render_index_page(
         "## 阅读方式",
         "",
         "- 本页只做索引，每一节标题都链接到对应的飞书知识库单篇文章。",
-        "- 原文链接、分享链接、正文摘录、OCR、转写和建议动作都放在单篇文章内。",
+        "- 原文链接、分享链接、来源笔记正本、OCR、视频转写和建议动作都放在单篇文章内。",
         "- 读完后回复 OpenClaw：`序号 已读：你的想法`、`序号 沉淀成提示词`、`序号 跳过` 或 `序号 继续解析`。",
         "",
         "## 今日精选",
@@ -354,7 +629,8 @@ def render_index_page(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def item_hash(item: base.PushItem) -> str:
+def item_hash(item: base.PushItem, source_material: dict[str, object] | None = None) -> str:
+    material = source_material or load_source_material(item)
     return base.content_hash(
         stable_json(
             {
@@ -371,6 +647,15 @@ def item_hash(item: base.PushItem) -> str:
                 "value": item.value,
                 "action": item.action,
                 "distill_direction": item.distill_direction,
+                "source_material": {
+                    "path": material.get("path"),
+                    "status": material.get("status"),
+                    "publish_status": material.get("publish_status"),
+                    "publish_ready": material.get("publish_ready"),
+                    "body_hash": material.get("body_hash"),
+                    "char_count": material.get("char_count"),
+                    "warning": material.get("warning"),
+                },
             }
         )
     )
@@ -416,10 +701,12 @@ def build_item_record(
     wiki_parent_node_token: str = "",
     wiki_parent_directory: str = "",
     wiki_parent_reason: str = "",
+    source_material: dict[str, object] | None = None,
     command_output: str = "",
     wiki_move_output: str = "",
     error: str = "",
 ) -> dict[str, object]:
+    material = source_material or {}
     return {
         "created_at": base.now_datetime(),
         "record_type": "frontdesk_item",
@@ -443,6 +730,15 @@ def build_item_record(
         "summary": item.summary,
         "original_url": item.original_url,
         "share_url": item.share_url,
+        "source_material_status": material.get("status", ""),
+        "source_material_path": material.get("path", ""),
+        "source_material_chars": material.get("char_count", 0),
+        "source_material_hash": material.get("body_hash", ""),
+        "source_material_warning": material.get("warning", ""),
+        "source_material_publish_status": material.get("publish_status", ""),
+        "source_material_publish_ready": material.get("publish_ready", False),
+        "source_material_publish_blockers": material.get("publish_blockers", []),
+        "source_material_publish_evidence": material.get("publish_evidence", []),
         "error": error,
         "command_output": command_output,
         "wiki_move_output": wiki_move_output,
@@ -610,7 +906,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--wiki-move-parent-node-token", default=os.environ.get("MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN", ""))
     parser.add_argument("--item-wiki-parent-node-token", default=os.environ.get("MY_MIND_FEISHU_ITEM_WIKI_PARENT_NODE_TOKEN", ""))
     parser.add_argument("--item-parent-map", default=os.environ.get("MY_MIND_FEISHU_ITEM_PARENT_MAP", str(DEFAULT_ITEM_PARENT_MAP)))
+    parser.add_argument("--gate-queue", default=str(DEFAULT_GATE_QUEUE), help="Markdown queue for Feishu publish items blocked by completeness gate.")
+    parser.add_argument("--gate-report-dir", default=str(DEFAULT_GATE_REPORT_DIR), help="Directory for timestamped Feishu publish gate reports.")
     parser.add_argument("--no-auto-item-parent-map", action="store_true", help="Disable per-item Feishu directory inference.")
+    parser.add_argument("--include-incomplete", action="store_true", help="Publish items even when source material is incomplete. Default blocks them.")
+    parser.add_argument("--no-gate-queue", action="store_true", help="Do not write the Feishu publish completeness queue/report.")
     parser.add_argument("--wiki-move-command", default=os.environ.get("MY_MIND_FEISHU_WIKI_MOVE_COMMAND", ""))
     parser.add_argument("--force", action="store_true", help="Create instead of reusing/updating existing records.")
     mode = parser.add_mutually_exclusive_group()
@@ -625,6 +925,8 @@ def main() -> int:
     run_dir = resolve_path(args.run_dir)
     draft_dir = resolve_path(args.draft_dir)
     record_file = resolve_path(args.record_file)
+    gate_queue = resolve_path(args.gate_queue)
+    gate_report_dir = resolve_path(args.gate_report_dir)
     push_path = resolve_path(args.push_file, default=base.latest_push(run_dir)) if args.push_file else base.latest_push(run_dir)
 
     title = args.title or f"my-mind 今日精选 {dt.datetime.now(TZ).strftime('%Y-%m-%d')}"
@@ -634,6 +936,11 @@ def main() -> int:
     items = base.parse_items(push_text)
     if args.max_items > 0:
         items = items[: args.max_items]
+    item_materials = [(item, load_source_material(item)) for item in items]
+    blocked_items = [(item, material) for item, material in item_materials if not material.get("publish_ready")]
+    publishable_items = item_materials if args.include_incomplete else [
+        (item, material) for item, material in item_materials if material.get("publish_ready")
+    ]
 
     records = base.load_records(record_file)
     inferred_space_id, inferred_index_parent = latest_wiki_context(records)
@@ -647,12 +954,15 @@ def main() -> int:
         print(f"# {title}")
         print()
         print(f"- 来源推送：`{base.repo_relative(push_path)}`")
-        print(f"- 将生成单篇文章：{len(items)}")
+        print(f"- 将生成单篇文章：{len(publishable_items)}")
+        print(f"- 门禁拦截：{0 if args.include_incomplete else len(blocked_items)}")
         print("- 将生成索引页：1")
         print()
-        for item in items:
+        for item, source_material in item_materials:
             existing = latest_record_for(records, record_type="frontdesk_item", key="item_identity", value=item_identity(item))
-            operation = "reuse" if existing and existing.get("content_hash") == item_hash(item) else "update" if existing else "create"
+            operation = "reuse" if existing and existing.get("content_hash") == item_hash(item, source_material) else "update" if existing else "create"
+            if not args.include_incomplete and not source_material.get("publish_ready"):
+                operation = "blocked"
             if args.item_wiki_parent_node_token:
                 parent_directory = "显式指定目录"
                 parent_reason = "使用 --item-wiki-parent-node-token"
@@ -660,17 +970,30 @@ def main() -> int:
                 _, parent_directory, parent_reason = infer_item_parent(item, item_parent_map)
                 if not parent_directory:
                     parent_directory = "未配置，回落到索引目录" if index_parent_token else "未配置"
-            print(f"- {item.index}. {item.title}：{operation}；单篇目录：{parent_directory}（{parent_reason}）")
+            print(
+                f"- {item.index}. {item.title}：{operation}；单篇目录：{parent_directory}（{parent_reason}）；"
+                f"来源正本：{source_material.get('publish_status')} / {source_material.get('char_count')} 字"
+            )
         return 0
+
+    if blocked_items and not args.include_incomplete and not args.no_gate_queue:
+        write_gate_outputs(blocked_items, push_path=push_path, queue_path=gate_queue, report_dir=gate_report_dir)
+    if not publishable_items and blocked_items and not args.include_incomplete:
+        print(
+            f"错误：飞书精选发布门禁拦截了全部 {len(blocked_items)} 条内容。"
+            f"请先处理 `{base.repo_relative(gate_queue)}` 后重试，或显式使用 --include-incomplete。",
+            file=sys.stderr,
+        )
+        return 2
 
     item_draft_dir.mkdir(parents=True, exist_ok=True)
     index_draft_dir.mkdir(parents=True, exist_ok=True)
 
     item_records: list[dict[str, object]] = []
-    for item in items:
+    for item, source_material in publishable_items:
         item_title = clean_title(item.title)
-        rendered = render_item_page(item, push_path, generated_at)
-        digest = item_hash(item)
+        rendered = render_item_page(item, push_path, generated_at, source_material)
+        digest = item_hash(item, source_material)
         draft_path = stable_item_draft_path(item_draft_dir, item)
         draft_path.write_text(rendered, encoding="utf-8")
         existing = latest_record_for(records, record_type="frontdesk_item", key="item_identity", value=item_identity(item))
@@ -696,6 +1019,7 @@ def main() -> int:
                 wiki_parent_node_token=item_parent,
                 wiki_parent_directory=item_parent_directory,
                 wiki_parent_reason=item_parent_reason,
+                source_material=source_material,
             )
         else:
             try:
@@ -728,6 +1052,7 @@ def main() -> int:
                     wiki_parent_node_token=item_parent,
                     wiki_parent_directory=item_parent_directory,
                     wiki_parent_reason=item_parent_reason,
+                    source_material=source_material,
                     command_output=command_output,
                     wiki_move_output=wiki_move_output,
                 )
@@ -743,6 +1068,7 @@ def main() -> int:
                     wiki_parent_node_token=item_parent,
                     wiki_parent_directory=item_parent_directory,
                     wiki_parent_reason=item_parent_reason,
+                    source_material=source_material,
                     error=str(exc),
                 )
                 base.append_record(record_file, record)

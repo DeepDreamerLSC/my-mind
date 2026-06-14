@@ -80,7 +80,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 - 不确认事实、观点、项目决策或沉淀结果。
 - OpenClaw 必须通过 `.codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py` 生成聊天消息；该脚本会自动发布或复用飞书精选 bundle，不要退回发送原文链接。
 - 推送优先级来自流转区；流转区缺失时才回退到收件箱评分排序。
-- 默认不推送 `内容质量: 需继续解析` 的条目；需要临时包含时显式加 `--include-low-quality`。
+- 默认不推送 `内容质量: 需继续解析` 或 `内容质量: 需核验` 的条目；需要临时包含时显式加 `--include-low-quality`。
 - 默认不推送已经有正式/已吸收长期知识回链的收件箱来源；需要调试时显式加 `--include-promoted`。
 - 推送状态只记录触达和反馈状态，不改变长期知识。
 

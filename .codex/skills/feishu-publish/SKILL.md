@@ -27,6 +27,12 @@ python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py 
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --dry-run
 ```
 
+默认会检查每条来源笔记的正文完整性；RSS/Atom 摘要、截断摘录、过短转写和缺少可读证据的条目会被阻断，并写入待补全队列。只有调试或临时兜底时才显式允许不完整条目：
+
+```bash
+python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --dry-run --include-incomplete
+```
+
 生成本地精选 bundle 草稿并追加发布记录：
 
 ```bash
@@ -53,10 +59,12 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publi
 bundle 模式会：
 
 - 为前台推送里的每条待读创建或更新一篇飞书文章。
-- 把原文链接、分享链接、摘录、OCR、转写和建议动作放进单篇文章。
+- 把原文链接、分享链接、来源笔记正本、OCR、视频转写和建议动作放进单篇文章；单篇文章是手机阅读正本，不只是提醒卡片。
 - 生成一个“今日精选”索引页，索引页每一节链接到对应飞书文章。
 - 索引页放在 `📱 my-mind 手机待读`；单篇文章按本地目录映射自动归入 `20_资料库精选/` 的对应主题目录。
 - 通过 `source_file`、标题、页面 token 和内容 hash 复用已有文章，避免重复创建。
+- 内容 hash 会纳入来源笔记正本的 hash；如果来源笔记补了全文、OCR 或转写，重跑发布会更新已有飞书文章。
+- 如果来源笔记仍只有 RSS 摘要、截断摘录、过短转写或缺少可读证据，默认阻断发布，不生成低价值飞书文章；需要人工兜底时显式加 `--include-incomplete`。
 - 如果已有单篇文章内容没变但父目录不对，重跑发布会移动已有 Wiki 节点，不新建重复文章。
 - 同一天的索引页按标题复用并更新，不因新的 `前台推送-*.md` 文件重复创建入口页。
 
@@ -110,11 +118,13 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py \
 ```text
 85_运行记录/飞书精选页/单篇/*.md
 85_运行记录/飞书精选页/索引/*.md
+05_流转区/40_待核验/飞书发布待补全队列.md
+85_运行记录/飞书精选页/门禁报告/*.md
 85_运行记录/飞书发布记录.jsonl
 85_运行记录/飞书阅读页/飞书阅读页-YYYY-MM-DD-HHMM.md（旧版兼容）
 ```
 
-`飞书发布记录.jsonl` 中记录飞书链接、来源推送、内容哈希、条目列表、发布状态，以及可选的 `wiki_space_id` / `wiki_node_token` / `wiki_parent_directory`。OpenClaw 不直接解析前台推送里的原文链接，也不自己判断飞书目录，而是调用 `prepare_openclaw_feishu_message.py` 自动补齐“发布精选 bundle -> 生成 OpenClaw 消息”链路，并最终读取与最新前台推送匹配的已发布 `frontdesk_bundle_index` 记录。
+`飞书发布记录.jsonl` 中记录飞书链接、来源推送、内容哈希、条目列表、来源正本接入状态、发布状态，以及可选的 `wiki_space_id` / `wiki_node_token` / `wiki_parent_directory`。OpenClaw 不直接解析前台推送里的原文链接，也不自己判断飞书目录，而是调用 `prepare_openclaw_feishu_message.py` 自动补齐“发布精选 bundle -> 生成 OpenClaw 消息”链路，并最终读取与最新前台推送匹配的已发布 `frontdesk_bundle_index` 记录。
 
 ## 工作边界
 
@@ -159,6 +169,7 @@ OpenClaw 的前台消息只发送：
 - 今日待读总标题。
 - 飞书知识库阅读链接。
 - 2 到 3 条重点标题和一句话摘要。
+- 需要用户确认的候选知识摘要。
 - 回复格式：`序号 已读：...`、`序号 沉淀成提示词`、`序号 跳过`、`序号 继续解析`。
 
 完整阅读内容放在飞书页中。

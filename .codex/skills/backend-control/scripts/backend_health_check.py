@@ -175,10 +175,55 @@ def flow_count(path: Path) -> int:
     return len(re.findall(r"^###\s+\d+\.", read_text(path), flags=re.M))
 
 
-def inspect_flow(flow_dir: Path) -> dict[str, int]:
+def split_queue_items(text: str) -> list[str]:
+    parts = re.split(r"(?m)^###\s+\d+\.\s+", text)
+    return [part.strip() for part in parts[1:] if part.strip()]
+
+
+def field_value(block: str, field: str) -> str:
+    match = re.search(rf"^- {re.escape(field)}：(.+)$", block, flags=re.M)
+    return match.group(1).strip() if match else ""
+
+
+def inspect_pending_distill_flow(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"total": 0, "ready": 0, "existing_candidate": 0, "deferred": 0, "stages": {}}
+
+    text = read_text(path)
+    total = flow_count(path)
+    stages: Counter[str] = Counter()
+    ready = 0
+    existing_candidate = 0
+    deferred = 0
+    for block in split_queue_items(text):
+        stage = field_value(block, "当前阶段") or "未知"
+        stages[stage] += 1
+        if "已有候选" in stage or "待确认" in stage:
+            existing_candidate += 1
+        elif any(keyword in stage for keyword in ["待补", "需核验", "待核验", "解析"]):
+            deferred += 1
+        else:
+            ready += 1
+    if not stages and total:
+        ready = total
+    return {
+        "total": total,
+        "ready": ready,
+        "existing_candidate": existing_candidate,
+        "deferred": deferred,
+        "stages": dict(stages),
+    }
+
+
+def inspect_flow(flow_dir: Path) -> dict[str, Any]:
+    pending_distill = inspect_pending_distill_flow(flow_dir / "30_待沉淀" / "收件箱待沉淀队列.md")
     return {
         "待读": flow_count(flow_dir / "10_待读" / "收件箱待读队列.md"),
-        "待沉淀": flow_count(flow_dir / "30_待沉淀" / "收件箱待沉淀队列.md"),
+        "待沉淀": pending_distill["total"],
+        "待沉淀待消费": pending_distill["ready"],
+        "已有候选待确认": pending_distill["existing_candidate"],
+        "待补判断": pending_distill["deferred"],
+        "待沉淀阶段分布": pending_distill["stages"],
         "待核验": flow_count(flow_dir / "40_待核验" / "收件箱待核验队列.md"),
     }
 
@@ -348,8 +393,12 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         codex_items.append(f"消费 {feedback['pending_count']} 条前台反馈队列，回写阅读思考或执行待确认动作。")
     if inbox["low_quality_count"]:
         codex_items.append(f"继续处理 {inbox['low_quality_count']} 条低质量/需核验解析，优先运行解析质量修复。")
-    if flow.get("待沉淀", 0):
-        codex_items.append(f"待沉淀队列有 {flow['待沉淀']} 条，可继续自动生成候选草稿并进入待确认。")
+    if flow.get("待沉淀待消费", 0):
+        codex_items.append(f"待沉淀队列有 {flow['待沉淀待消费']} 条可继续自动生成候选草稿并进入待确认。")
+    elif flow.get("已有候选待确认", 0):
+        codex_items.append(f"待沉淀队列中 {flow['已有候选待确认']} 条已有候选，下一步是 OpenClaw 提醒确认，不再重复消费。")
+    if flow.get("待补判断", 0):
+        codex_items.append(f"待沉淀队列中 {flow['待补判断']} 条仍需补解析或补判断，先走核验门禁。")
     if flow.get("待核验", 0):
         codex_items.append(f"待核验队列有 {flow['待核验']} 条，避免直接进入前台精选。")
     if not codex_items:
@@ -435,7 +484,7 @@ def build_dashboard(data: dict[str, Any]) -> str:
             "## 数字总览",
             "",
             f"- 收件箱：{inbox['total']} 条；低质量/需核验：{inbox['low_quality_count']} 条",
-            f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}，待核验 {flow['待核验']}",
+            f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}（可消费 {flow['待沉淀待消费']}，已有候选 {flow['已有候选待确认']}，待补判断 {flow['待补判断']}），待核验 {flow['待核验']}",
             f"- 待确认候选：{confirmations['pending_count']} 条",
             f"- 前台反馈待消费：{feedback['pending_count']} 条",
             f"- 已推送未反馈：{push_state.get('waiting_feedback', 0)} 条；24 小时冷却中：{push_state.get('cooling', 0)} 条",
@@ -605,6 +654,9 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     add_metric("低质量解析", inbox["low_quality_count"], category="收件箱")
     add_metric("待读", flow["待读"], category="流转区")
     add_metric("待沉淀", flow["待沉淀"], category="流转区")
+    add_metric("待沉淀可消费", flow["待沉淀待消费"], category="流转区")
+    add_metric("已有候选待确认", flow["已有候选待确认"], category="流转区")
+    add_metric("待补判断", flow["待补判断"], category="流转区")
     add_metric("待核验", flow["待核验"], category="流转区")
     add_metric("待确认候选", confirmations["pending_count"], category="确认")
     add_metric("前台反馈待消费", feedback["pending_count"], category="反馈")
@@ -711,6 +763,19 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
         )
 
     for name, count in flow.items():
+        if isinstance(count, dict):
+            for stage, stage_count in count.items():
+                rows["flow"].append(
+                    {
+                        "记录键": f"flow:待沉淀阶段:{stage}",
+                        "生成时间": generated_at,
+                        "队列": "待沉淀阶段",
+                        "阶段": stage,
+                        "数量": stage_count,
+                        "状态等级": digest["level"],
+                    }
+                )
+            continue
         rows["flow"].append(
             {
                 "记录键": f"flow:{name}",
@@ -784,8 +849,12 @@ def build_report(data: dict[str, Any]) -> str:
         actions.append("低质量或未完整解析条目不进入前台推送，先补 OCR、字幕或转写。")
     if push_state.get("waiting_feedback"):
         actions.append("前台推送进入冷却，OpenClaw 不重复催同一批条目，除非用户主动要求。")
-    if flow.get("待沉淀", 0):
-        actions.append("待沉淀队列已有内容，可在用户确认后批量生成候选草稿。")
+    if flow.get("待沉淀待消费", 0):
+        actions.append("待沉淀队列已有可消费内容，可自动生成候选草稿。")
+    elif flow.get("已有候选待确认", 0):
+        actions.append("待沉淀队列主要是已有候选，OpenClaw 负责提醒确认，Codex 不重复生成候选。")
+    if flow.get("待补判断", 0):
+        actions.append("待补判断条目先补解析或人工判断，不直接进入沉淀消费。")
     if not actions:
         actions.append("后台链路暂无明显阻塞，保持现有自动化频率。")
 
@@ -796,7 +865,7 @@ def build_report(data: dict[str, Any]) -> str:
         "",
         f"- 巡检时间：{data['generated_at']}",
         f"- 收件箱总数：{inbox['total']}",
-        f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}，待核验 {flow['待核验']}",
+        f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}（可消费 {flow['待沉淀待消费']}，已有候选 {flow['已有候选待确认']}，待补判断 {flow['待补判断']}），待核验 {flow['待核验']}",
         f"- 待处理前台反馈：{feedback['pending_count']}",
         f"- 待确认候选：{confirmations['pending_count']}",
         f"- 已推送未反馈：{push_state.get('waiting_feedback', 0)}",

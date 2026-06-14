@@ -32,7 +32,7 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
-python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-data --write --dedupe --delete-long-keys --delete-stale
+python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-data --refresh-advice --write --dedupe --delete-long-keys --delete-stale
 ```
 
 同步记录写入：
@@ -61,6 +61,7 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-
 - `待确认候选`
 - `前台推送`
 - `流转队列`
+- `当前行动建议`
 
 如果飞书表名不同，使用本地配置覆盖，配置文件不要提交：
 
@@ -114,6 +115,6 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --init-tab
 - 指标卡：后台状态指数、待确认候选、待读、待沉淀、待核验、低质量解析、已推送未反馈。
 - 折线图：`指标历史` 中近 7/30 天的关键指标。
 - 漏斗图：`流转队列` 或 `后台指标` 中收件箱到转正同步的数量。
-- 表格：`行动队列`、`待确认候选`、`解析质量`。
+- 表格：`当前行动建议`、`行动队列`、`待确认候选`、`解析质量`。
 
 后续如果仪表盘布局稳定，再考虑让脚本自动创建 dashboard block。

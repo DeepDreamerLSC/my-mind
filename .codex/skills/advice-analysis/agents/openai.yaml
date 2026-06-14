@@ -1,0 +1,6 @@
+interface:
+  display_name: "建议分析"
+  short_description: "汇总项目和后台证据，生成下一步行动建议。"
+  default_prompt: "Use $advice-analysis to generate a prioritized action analysis for my-mind."
+policy:
+  allow_implicit_invocation: true

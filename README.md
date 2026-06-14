@@ -204,11 +204,47 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 - `85_运行记录/后台总览/飞书仪表盘数据.json`：飞书多维表格同步数据。
 - `85_运行记录/后台总览/飞书仪表盘数据/*.csv`：按表拆分的 CSV。
 
+后台总览中的 `待沉淀` 会拆成 `可消费`、`已有候选`、`待补判断` 三类。只有 `可消费` 才代表 Codex 应继续自动生成候选；`已有候选` 应交给 OpenClaw 提醒确认，`待补判断` 先进入解析或人工判断门禁。
+
 只刷新飞书仪表盘数据：
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --export-dashboard-data
 ```
+
+### 建议分析
+
+把后台总览、项目巡检、待确认队列和项目文件汇总成优先级行动建议：
+
+```bash
+python3 .codex/skills/advice-analysis/scripts/analyze_advice.py
+```
+
+写入建议分析报告，并刷新固定行动面板：
+
+```bash
+python3 .codex/skills/advice-analysis/scripts/analyze_advice.py --write
+```
+
+生成 OpenClaw 可直接读取的短消息出口：
+
+```bash
+python3 .codex/skills/advice-analysis/scripts/prepare_openclaw_advice_message.py --write
+```
+
+按项目查看：
+
+```bash
+python3 .codex/skills/advice-analysis/scripts/analyze_advice.py --project edu-agent --write
+```
+
+输出位置：
+
+- `85_运行记录/建议分析-*.md`：带证据来源的完整行动建议报告。
+- `85_运行记录/后台总览/当前行动建议.md`：固定覆盖的当前行动面板。
+- `85_运行记录/后台总览/OpenClaw行动建议.md`：秘书只读的短消息出口。
+- `85_运行记录/建议分析状态.json`：建议项状态，记录待处理、待提醒、已提醒等状态。
+- `85_运行记录/后台总览/飞书仪表盘数据/当前行动建议.csv`：飞书仪表盘表格数据。
 
 ### 飞书仪表盘同步
 
@@ -222,12 +258,12 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py
 
 ```bash
 MY_MIND_FEISHU_DASHBOARD_BASE_TOKEN='base_token' \
-python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-data --write
+python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-data --refresh-advice --write
 ```
 
 本地配置文件可放在 `85_运行记录/飞书仪表盘配置.local.json`，不要提交。同步脚本按 `记录键` 搜索远端记录，找到则更新，找不到才新增，避免重复行。
 
-主动同步时可以直接对 Codex 或 OpenClaw 说“同步飞书仪表盘”“刷新后台驾驶舱”或“更新多维表格看板”。后台会先刷新 `backend-control` 总览，再同步飞书多维表格。
+主动同步时可以直接对 Codex 或 OpenClaw 说“同步飞书仪表盘”“刷新后台驾驶舱”或“更新多维表格看板”。后台会先刷新 `backend-control` 总览，再刷新 `advice-analysis` 当前行动建议，最后同步飞书多维表格。
 
 ### 解析质量修复
 
@@ -248,7 +284,7 @@ python3 .codex/skills/parse-quality-repair/scripts/repair_parse_quality.py --wri
 - `05_流转区/40_待核验/解析质量修复队列.md`
 - `85_运行记录/解析质量修复-*.md`
 
-第一版只自动修复低风险问题，例如繁体转简体、明显术语误识别、质量门禁说明缺失。需要重抓、补 OCR、补字幕或长视频重转写的条目会继续留在待核验队列，不会硬推到长期知识。
+第一版只自动修复低风险问题，例如繁体转简体、明显术语误识别、质量门禁说明缺失。RSS/Atom 摘要、截断摘录、过短转写、需要重抓、补 OCR、补字幕或长视频重转写的条目会继续留在待核验队列，不会进入前台精选、飞书发布或长期知识转正。
 
 ### 生成前台推送
 
@@ -271,7 +307,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py \
 - `--limit 0` 表示推送全量候选。
 - `--cooldown-hours 24` 表示 24 小时内已推送但未反馈的条目不重复推。
 - `--force` 会忽略冷却时间。
-- `--include-low-quality` 会把 `内容质量: 需继续解析` 的条目也推出来，一般只用于调试。
+- `--include-low-quality` 会把 `内容质量: 需继续解析` 或 `内容质量: 需核验` 的条目也推出来，一般只用于调试。
 - 已经有正式/已吸收长期知识回链的收件箱来源会被默认跳过；调试时可用 `--include-promoted` 临时包含。
 
 ### 发布飞书精选页
@@ -306,6 +342,9 @@ python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py
 
 - `📱 my-mind 手机待读` 只放“今日精选”索引页，方便 OpenClaw 给手机端发一个入口。
 - 每条单篇文章会按标题、来源、摘要和沉淀方向，自动归到 `20_资料库精选/` 的对应主题目录。
+- 单篇文章会回源读取 `来源文件`，把本地收件箱笔记中已保存的正文、平台文案、OCR、视频转写和原文链接放入“原文与完整解析”；前台推送和 OpenClaw 消息只保留短摘要。
+- 内容 hash 会纳入来源正本；来源笔记补全文、OCR 或转写后，重跑发布会更新已有飞书文章，不重复新建。
+- 如果来源笔记本身仍只有 RSS/Atom 摘要、截断摘录、过短转写或缺少可读证据，默认阻断发布并写入待补全队列，需要先执行继续解析；只有调试或临时兜底时才加 `--include-incomplete`。
 - 同一天的入口页按标题复用并更新；新的 `前台推送-*.md` 不应造成飞书里新增多个“今日待读/今日精选”页面。
 - 如果已有单篇文章内容相同但父目录不对，重跑发布会移动已有 Wiki 节点，不重复新建文档。
 
@@ -322,6 +361,11 @@ export MY_MIND_FEISHU_WIKI_PARENT_NODE_TOKEN='手机待读目录node_token'
 python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --dry-run
 ```
 
+飞书正文完整性门禁的输出位置：
+
+- `05_流转区/40_待核验/飞书发布待补全队列.md`
+- `85_运行记录/飞书精选页/门禁报告/*.md`
+
 底层调试命令：
 
 ```bash
@@ -329,7 +373,7 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publi
 python3 .codex/skills/feishu-publish/scripts/build_openclaw_feishu_message.py
 ```
 
-`prepare_openclaw_feishu_message.py` 会输出飞书知识库精选索引链接和少量重点标题。它会自动补齐飞书发布链路；如果发布失败，OpenClaw 应把失败原因转成短提示，不应退回发送原文链接或前台推送 Markdown。
+`prepare_openclaw_feishu_message.py` 会输出飞书知识库精选索引链接、少量重点标题和需要你确认的候选知识。它会自动补齐飞书发布链路；如果发布失败，OpenClaw 应把失败原因转成短提示，不应退回发送原文链接或前台推送 Markdown。
 
 ### 记录和消费前台反馈
 
@@ -551,6 +595,13 @@ python3 .codex/skills/obsidian-linking/scripts/suggest_links.py \
 python3 .codex/skills/project-progress/scripts/project_progress.py --write
 ```
 
+按项目生成巡检报告：
+
+```bash
+python3 .codex/skills/project-progress/scripts/project_progress.py --write --project my-mind
+python3 .codex/skills/project-progress/scripts/project_progress.py --write --project edu-agent
+```
+
 只预览，不写文件：
 
 ```bash
@@ -563,7 +614,7 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --dry-run
 python3 .codex/skills/project-progress/scripts/project_progress.py --write --apply
 ```
 
-定时任务默认只写 `85_运行记录/项目进展巡检-*.md`，不自动 commit，也不直接改 `项目进展.md`。
+定时任务默认只写 `85_运行记录/项目进展巡检-<project>-*.md`，不自动 commit，也不直接改 `项目进展.md`。当前项目组合包括 `my-mind` 和 `edu-agent`，其中 `edu-agent` 的代码证据源是 `/Users/linsuchang/Desktop/work/edu-agent`。
 
 项目进展巡检不是纯汇总。报告必须包含 `Codex 项目分析`：
 
@@ -594,7 +645,7 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --write --app
 - `需核验`：有摘要或片段，但来源、转写或关键信息需要人工核验。
 - `需继续解析`：只拿到链接或低价值元数据，不应该直接推送。
 
-默认前台推送会跳过 `需继续解析`。如果抖音、小红书或 YouTube 没解析出正文，要优先重新入箱或强制转写，而不是把空文档沉淀进长期知识。
+默认前台推送会跳过 `需继续解析` 和 `需核验`。如果抖音、小红书、RSS、YouTube 或网页没解析出正文，要优先重新入箱、补全文或强制转写，而不是把空文档沉淀进长期知识。
 
 ## 长期知识转正门禁
 
@@ -628,8 +679,8 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --write --app
 - `收件箱入箱门禁审核`：每 6 小时执行一次，先运行 `parse-quality-repair --write --limit 5`，再检查入箱质量、推送状态和反馈队列异常。
 - `前台反馈与待确认消费`：每 6 小时执行一次，运行 `frontdesk-feedback --write --sync-feishu`，消费普通阅读反馈和候选待确认回复。
 - `前沿情报每日入箱`：每天早上运行前沿情报巡检并把通过门禁的候选入箱。
-- `项目进展每日巡检`：每天 20:30 生成项目进展候选报告，读取 git、运行记录和项目文件，但不自动 commit，也不自动 `--apply`。
-- `飞书仪表盘每日同步`：每天 07:00、14:00、21:00 刷新后台总览，并把结构化数据同步到飞书多维表格。
+- `项目组合每日巡检`：每天 20:30 分别生成 `my-mind` 和 `edu-agent` 项目进展候选报告，读取 git、运行记录和项目文件，但不自动 commit，也不自动 `--apply`。
+- `飞书仪表盘每日同步`：每天 07:00、14:00、21:00 刷新后台总览和当前行动建议，并把结构化数据同步到飞书多维表格。
 
 自动化配置不在仓库内，运行记录写入 `85_运行记录/`。如果怀疑自动化停了，先跑：
 
@@ -641,6 +692,8 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 
 - `85_运行记录/后台总览/当前后台状态.md`
 - `85_运行记录/后台总览/OpenClaw待提醒.md`
+- `85_运行记录/后台总览/当前行动建议.md`
+- `85_运行记录/后台总览/OpenClaw行动建议.md`
 
 ## OpenClaw 和 Codex 的分工
 
@@ -651,6 +704,7 @@ OpenClaw 适合做前台秘书：
 - 你说“入库”时，调用 `knowledge-intake`，先入箱，再推进到候选知识和确认问题清单。
 - 当前 OpenClaw 原生 `openclaw skills list` 不会自动发现项目内 `.codex/skills/knowledge-intake`；本机 OpenClaw workspace 已补薄入口 `my-mind-knowledge-intake`，实际仍调用本仓库脚本，避免两套实现分叉。
 - 调用 `prepare_openclaw_feishu_message.py` 自动发布或复用最新飞书精选，并把飞书知识库链接拆成短消息推给你。
+- 前台展示时优先推飞书精选索引和待确认候选，不直接转发原文链接，也不让你翻自动化日志。
 - 收集你的短反馈，并追加到 `85_运行记录/前台反馈队列.jsonl`。
 - 不直接判断长期知识结构，不直接改写资料库正文。
 
@@ -666,6 +720,7 @@ Codex 适合做后台工程师：
 
 - 本地 Markdown 是源库，飞书是手机阅读镜像。
 - 每日前台待读用 `feishu-publish`，精选长期知识用 `feishu-sync`。
+- 前台消息只做提醒和入口；真正可读的正文应在飞书单篇页里，来自本地 `来源文件` 的完整解析区块。
 - 飞书侧编辑不要当作最终正文；需要保留的修改应回到本地 Markdown。
 - 凭证、`space_id`、`node_token` 和目录映射只放在本地环境变量或 `.local.json` 文件，不提交进仓库。
 - 如果手机飞书看不到页面，优先检查 `lark-cli` 是否是 `identity = user`。
@@ -714,6 +769,7 @@ python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py -
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
+python3 .codex/skills/advice-analysis/scripts/analyze_advice.py --write
 ```
 
 ## 工作边界

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 DEFAULT_RECORD_FILE = DEFAULT_RUN_DIR / "飞书发布记录.jsonl"
+DEFAULT_CONFIRMATION_FILE = DEFAULT_RUN_DIR / "后台总览" / "OpenClaw待提醒.md"
 
 
 def repo_relative(path: Path) -> str:
@@ -97,6 +99,45 @@ def trim(text: object, max_chars: int) -> str:
     return value[: max_chars - 1].rstrip() + "…"
 
 
+def section_between(text: str, heading: str) -> str:
+    marker = f"## {heading}"
+    start = text.find(marker)
+    if start < 0:
+        return ""
+    start = text.find("\n", start)
+    if start < 0:
+        return ""
+    next_index = text.find("\n## ", start + 1)
+    end = next_index if next_index >= 0 else len(text)
+    return text[start:end].strip()
+
+
+def load_confirmation_items(path: Path, max_items: int) -> list[str]:
+    if max_items <= 0 or not path.exists():
+        return []
+    text = path.read_text(encoding="utf-8", errors="ignore")
+    section = section_between(text, "待确认候选")
+    if not section:
+        return []
+    items: list[str] = []
+    current: list[str] = []
+    for raw_line in section.splitlines():
+        line = raw_line.rstrip()
+        if not line.strip():
+            continue
+        if re.match(r"^\d+\.\s+", line):
+            if current:
+                items.append("\n".join(current))
+                current = []
+            current.append(line.strip())
+            continue
+        if current and ("候选：" in line or "可回复：" in line):
+            current.append("   " + line.strip().lstrip("- "))
+    if current:
+        items.append("\n".join(current))
+    return items[:max_items]
+
+
 def item_lines(record: dict[str, object], max_items: int, summary_chars: int) -> list[str]:
     raw_items = record.get("items")
     if not isinstance(raw_items, list):
@@ -144,7 +185,12 @@ def split_chunks(message: str, chunk_size: int) -> list[str]:
     return chunks
 
 
-def render_message(record: dict[str, object], max_items: int, summary_chars: int) -> str:
+def render_message(
+    record: dict[str, object],
+    max_items: int,
+    summary_chars: int,
+    confirmation_items: list[str] | None = None,
+) -> str:
     title = str(record.get("title") or "my-mind 今日待读").strip()
     url = reading_url(record)
     count = int(record.get("item_count") or 0)
@@ -160,6 +206,10 @@ def render_message(record: dict[str, object], max_items: int, summary_chars: int
         lines.extend(["", "精选条目：" if is_bundle else "先看这几条："])
         for highlight in highlights:
             lines.extend(["", highlight])
+    if confirmation_items:
+        lines.extend(["", "需要你确认："])
+        for item in confirmation_items:
+            lines.extend(["", item])
     lines.extend(
         [
             "",
@@ -181,6 +231,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-items", type=int, default=3, help="Maximum item highlights. Use 0 for all.")
     parser.add_argument("--summary-chars", type=int, default=90, help="Maximum summary characters per highlighted item.")
     parser.add_argument("--chunk-size", type=int, default=0, help="Split output into chunks no longer than this many characters. 0 disables splitting.")
+    parser.add_argument("--confirmation-file", default=str(DEFAULT_CONFIRMATION_FILE), help="OpenClaw reminder markdown that contains 待确认候选.")
+    parser.add_argument("--confirmation-max-items", type=int, default=2, help="Maximum confirmation items appended to the message. 0 disables.")
     parser.add_argument("--allow-stale", action="store_true", help="Allow latest published Feishu record even if it does not match the latest push.")
     parser.add_argument("--allow-legacy-reading-page", action="store_true", help="Allow old single-page reading records when no bundle index exists.")
     parser.add_argument("--json", action="store_true", help="Output structured JSON instead of plain text.")
@@ -195,6 +247,9 @@ def main() -> int:
     record_file = Path(args.record_file)
     if not record_file.is_absolute():
         record_file = ROOT / record_file
+    confirmation_file = Path(args.confirmation_file)
+    if not confirmation_file.is_absolute():
+        confirmation_file = ROOT / confirmation_file
     push_path = Path(args.push_file) if args.push_file else latest_push(run_dir)
     if not push_path.is_absolute():
         push_path = ROOT / push_path
@@ -216,7 +271,8 @@ def main() -> int:
         )
         return 2
 
-    message = render_message(record, max(0, args.max_items), max(0, args.summary_chars))
+    confirmation_items = load_confirmation_items(confirmation_file, max(0, args.confirmation_max_items))
+    message = render_message(record, max(0, args.max_items), max(0, args.summary_chars), confirmation_items)
     chunks = split_chunks(message, args.chunk_size)
     if args.json:
         payload = {
@@ -228,6 +284,7 @@ def main() -> int:
             "wiki_node_token": record.get("wiki_node_token") or "",
             "item_count": record.get("item_count") or 0,
             "items": record.get("items") or [],
+            "confirmation_items": confirmation_items,
             "chunks": chunks,
         }
         print(json.dumps(payload, ensure_ascii=False, indent=2))

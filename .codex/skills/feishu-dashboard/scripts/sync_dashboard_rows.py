@@ -31,8 +31,9 @@ DEFAULT_TABLE_MAP = {
     "confirmations": "待确认候选",
     "push_items": "前台推送",
     "flow": "流转队列",
+    "advice": "当前行动建议",
 }
-NUMBER_FIELDS = {"数值", "距现在小时", "数量"}
+NUMBER_FIELDS = {"数值", "距现在小时", "数量", "分数", "提醒次数"}
 
 
 def now_datetime() -> str:
@@ -237,6 +238,17 @@ def refresh_dashboard_data(data_file: Path) -> None:
         raise RuntimeError(f"刷新本地仪表盘数据失败：{result.stderr.strip() or result.stdout.strip()}")
 
 
+def refresh_advice_data() -> None:
+    command = [
+        sys.executable,
+        str(ROOT / ".codex" / "skills" / "advice-analysis" / "scripts" / "analyze_advice.py"),
+        "--write",
+    ]
+    result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(f"刷新建议分析失败：{result.stderr.strip() or result.stdout.strip()}")
+
+
 def init_tables(
     *,
     tables: dict[str, Any],
@@ -414,6 +426,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tables", default="", help="Comma-separated local table keys. Defaults to all.")
     parser.add_argument("--max-rows", type=int, default=0, help="Limit rows per table. 0 means all rows.")
     parser.add_argument("--refresh-data", action="store_true", help="Run backend-control export before syncing.")
+    parser.add_argument("--refresh-advice", action="store_true", help="Run advice-analysis after refreshing dashboard data so the advice table is included.")
     parser.add_argument("--init-tables", action="store_true", help="Create Feishu Base tables and fields. Use only for a new Base.")
     parser.add_argument("--init-only", action="store_true", help="Only initialize tables/fields; do not sync rows.")
     parser.add_argument("--dedupe", action="store_true", help="Delete duplicate Feishu rows with the same 记录键 after syncing.")
@@ -432,6 +445,8 @@ def main() -> int:
 
     if args.refresh_data or not data_file.exists():
         refresh_dashboard_data(data_file)
+    if args.refresh_advice:
+        refresh_advice_data()
     if not data_file.exists():
         print(f"错误：缺少仪表盘数据文件 {repo_relative(data_file)}", file=sys.stderr)
         return 2
