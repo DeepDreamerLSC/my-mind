@@ -26,6 +26,8 @@ DISTILL_SCRIPT = ROOT / ".codex" / "skills" / "inbox-distill" / "scripts" / "dis
 FEISHU_SYNC_SCRIPT = ROOT / ".codex" / "skills" / "feishu-sync" / "scripts" / "sync_selected_notes.py"
 TERMINAL_STATUSES = {"已处理", "已晋升", "可丢弃", "已归档"}
 CONFIRM_ACTIONS = {"确认转正", "继续核验", "调整分类"}
+READ_ACTIONS = {"已读", "补充想法"}
+LOW_VALUE_HINTS = ["没什么价值", "没有价值", "价值不高", "不用沉淀", "不需要沉淀", "无需沉淀", "先不沉淀"]
 PROMOTION_ROOTS = [
     ROOT / "20_资料库",
     ROOT / "30_原子笔记",
@@ -117,7 +119,7 @@ def yaml_string(value: str) -> str:
 def replace_frontmatter_entry(text: str, key: str, replacement_lines: list[str]) -> str:
     front_lines, body = split_frontmatter(text)
     if not front_lines:
-        return text
+        return "---\n" + "\n".join(replacement_lines).rstrip() + "\n---\n" + text.lstrip("\n")
     start = None
     end = None
     for index, line in enumerate(front_lines):
@@ -197,8 +199,137 @@ def push_file_candidates(record: dict[str, Any]) -> list[dict[str, str]]:
             if source:
                 break
         if source:
-            candidates.append({"title": heading.group(1).strip(), "source": source, "evidence": repo_rel(path), "boost": "120"})
+            number_match = re.search(r"^###\s+(\d+)\.", heading.group(0))
+            candidates.append(
+                {
+                    "target_no": number_match.group(1) if number_match else str(index + 1),
+                    "title": heading.group(1).strip(),
+                    "source": source,
+                    "evidence": repo_rel(path),
+                    "boost": "120",
+                }
+            )
     return candidates
+
+
+def chinese_number_to_int(value: str) -> int | None:
+    value = value.strip()
+    if not value:
+        return None
+    digits = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+    if value.isdigit():
+        return int(value)
+    if value in digits:
+        return digits[value]
+    if value == "十":
+        return 10
+    if "十" in value:
+        left, _, right = value.partition("十")
+        tens = digits.get(left, 1) if left else 1
+        ones = digits.get(right, 0) if right else 0
+        return tens * 10 + ones
+    return None
+
+
+def requested_batch_count(text: str, default: int) -> int:
+    if re.search(r"全部|所有|全量|都", text):
+        return default
+    numbered = re.findall(r"(?m)^\s*\d+[\.\)、:：\s-]+", text)
+    if len(numbered) > 1:
+        return min(len(numbered), default)
+    for pattern in [
+        r"前\s*(\d+)\s*条",
+        r"前\s*(\d+)\s*个",
+        r"(\d+)\s*条",
+        r"(\d+)\s*个",
+        r"前\s*([一二两三四五六七八九十]+)\s*条",
+        r"前\s*([一二两三四五六七八九十]+)\s*个",
+        r"([一二两三四五六七八九十]+)\s*条",
+        r"([一二两三四五六七八九十]+)\s*个",
+        r"前\s*([一二两三四五六七八九十]+)",
+    ]:
+        match = re.search(pattern, text)
+        if match:
+            count = chinese_number_to_int(match.group(1))
+            if count:
+                return min(count, default)
+    return 0
+
+
+def pending_confirmation_records() -> list[dict[str, Any]]:
+    pending_statuses = {"待确认", "待处理", "需要确认", "已有候选待确认"}
+    pending: list[dict[str, Any]] = []
+    for record in confirmation_records():
+        status = str(record.get("处理状态") or record.get("状态") or "")
+        if status in pending_statuses or status.endswith("待确认"):
+            pending.append(record)
+    return pending
+
+
+def expand_confirmation_batch(record: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(record.get("目标序号") or "").strip() or str(record.get("来源文件") or "").strip():
+        return []
+    action = str(record.get("动作") or "")
+    if action not in CONFIRM_ACTIONS and action != "跳过":
+        return []
+    if "待确认队列" not in str(record.get("推送文件") or "") and action not in CONFIRM_ACTIONS:
+        return []
+    text = "\n".join(str(record.get(key) or "") for key in ["内容", "原始回复"])
+    pending = pending_confirmation_records()
+    count = requested_batch_count(text, len(pending))
+    if count <= 1:
+        return []
+    expanded: list[dict[str, Any]] = []
+    for confirm in pending[:count]:
+        child = dict(record)
+        child["批量来源"] = "待确认批量反馈"
+        child["目标序号"] = str(confirm.get("序号") or "")
+        child["目标标题"] = str(confirm.get("标题") or "")
+        child["来源文件"] = str(confirm.get("来源文件") or "")
+        candidate = first_candidate_from_record(confirm)
+        child["候选文件"] = candidate
+        child["候选文件列表"] = [candidate] if candidate else []
+        if not child.get("目标类型"):
+            child["目标类型"] = str(confirm.get("类型") or "")
+        child["内容"] = str(record.get("内容") or record.get("原始回复") or "")
+        expanded.append(child)
+    return expanded
+
+
+def expand_push_batch(record: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(record.get("目标序号") or "").strip() or str(record.get("来源文件") or "").strip():
+        return []
+    if "待确认队列" in str(record.get("推送文件") or ""):
+        return []
+    action = str(record.get("动作") or "")
+    if action not in {*READ_ACTIONS, "跳过", "继续解析", "沉淀"}:
+        return []
+    candidates = push_file_candidates(record)
+    text = "\n".join(str(record.get(key) or "") for key in ["内容", "原始回复"])
+    count = requested_batch_count(text, len(candidates))
+    if count <= 1:
+        return []
+    expanded: list[dict[str, Any]] = []
+    for candidate in candidates[:count]:
+        child = dict(record)
+        child["批量来源"] = "前台推送批量反馈"
+        child["目标序号"] = candidate.get("target_no", "")
+        child["目标标题"] = candidate.get("title", "")
+        child["来源文件"] = candidate.get("source", "")
+        expanded.append(child)
+    return expanded
+
+
+def expand_batch_record(record: dict[str, Any]) -> list[dict[str, Any]]:
+    if str(record.get("处理状态") or "") != "待处理":
+        return [record]
+    expanded = expand_confirmation_batch(record) or expand_push_batch(record)
+    return expanded if expanded else [record]
+
+
+def low_value_feedback(record: dict[str, Any]) -> bool:
+    text = "\n".join(str(record.get(key) or "") for key in ["内容", "原始回复"])
+    return any(hint in text for hint in LOW_VALUE_HINTS)
 
 
 def publish_record_candidates(record: dict[str, Any]) -> list[dict[str, str]]:
@@ -726,11 +857,17 @@ def process_record(record: dict[str, Any], *, write: bool, distill: bool, force_
 
     if action in {"已读", "补充想法", "沉淀"}:
         updated = append_to_section(updated, "阅读思考", entry)
+    if action == "已读":
+        updated = set_scalar_field(updated, "阅读状态", "已读")
     if promotion_feedback:
         updated = append_to_section(updated, "前台反馈处理记录", entry)
         updated = set_scalar_field(updated, "阅读状态", "已读")
         updated = set_scalar_field(updated, "处理状态", "已晋升")
         updated = set_scalar_field(updated, "入库状态", "已晋升")
+    elif action == "已读" and low_value_feedback(record):
+        updated = append_to_section(updated, "前台反馈处理记录", entry)
+        updated = set_scalar_field(updated, "处理状态", "已归档")
+        updated = set_scalar_field(updated, "入库状态", "无需沉淀")
     elif action == "跳过":
         updated = append_to_section(updated, "前台反馈处理记录", entry)
         updated = set_scalar_field(updated, "处理状态", "已归档")
@@ -794,7 +931,13 @@ def update_push_state(path: Path, records: list[dict[str, Any]], *, write: bool)
         item = items[source]
         if not isinstance(item, dict):
             continue
-        item["feedback_status"] = "已晋升" if str(record.get("处理状态") or "") == "已晋升" else str(record.get("动作") or "已反馈")
+        if str(record.get("处理状态") or "") == "已晋升":
+            feedback_status = "已晋升"
+        elif str(record.get("处理状态") or "") == "已归档" or low_value_feedback(record):
+            feedback_status = "已读-不沉淀"
+        else:
+            feedback_status = str(record.get("动作") or "已反馈")
+        item["feedback_status"] = feedback_status
         item["last_feedback_at"] = str(record.get("时间") or now_datetime())
         item["last_feedback_content"] = str(record.get("内容") or record.get("原始回复") or "")
         changed = True
@@ -854,6 +997,44 @@ def main() -> int:
     processed_records: list[dict[str, Any]] = []
     results: list[str] = []
     for record in records:
+        expanded_records = expand_batch_record(record)
+        if len(expanded_records) > 1:
+            batch_results: list[str] = []
+            batch_processed: list[dict[str, Any]] = []
+            for child in expanded_records:
+                updated, result = process_record(
+                    child,
+                    write=args.write,
+                    distill=not args.no_distill,
+                    force_distill=args.force_distill,
+                    sync_feishu=args.sync_feishu,
+                )
+                batch_results.append(result)
+                if result.startswith(("完成", "失败", "待确认")):
+                    batch_processed.append(updated)
+            record["处理状态"] = (
+                "部分处理"
+                if any(result.startswith(("失败", "待确认")) for result in batch_results)
+                else "已处理"
+            )
+            record["处理结果"] = f"批量展开 {len(expanded_records)} 条；" + "；".join(batch_results)
+            record["处理时间"] = now_datetime()
+            record["批量展开条数"] = len(expanded_records)
+            record["批量处理明细"] = [
+                {
+                    "目标序号": child.get("目标序号") or "",
+                    "目标标题": child.get("目标标题") or "",
+                    "来源文件": child.get("来源文件") or "",
+                    "候选文件": child.get("候选文件") or "",
+                    "处理结果": result,
+                }
+                for child, result in zip(expanded_records, batch_results)
+            ]
+            updated_records.append(record)
+            processed_records.extend(batch_processed)
+            results.append(f"完成：批量反馈 -> {len(expanded_records)} 条")
+            results.extend(f"  - {result}" for result in batch_results)
+            continue
         updated, result = process_record(
             record,
             write=args.write,
@@ -863,7 +1044,7 @@ def main() -> int:
         )
         updated_records.append(updated)
         results.append(result)
-        if result.startswith(("完成", "失败")):
+        if result.startswith(("完成", "失败", "待确认")):
             processed_records.append(updated)
 
     report = build_report(results, processed_records, dry_run=not args.write)

@@ -41,6 +41,18 @@ python3 .codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py \
   "1 确认转正"
 ```
 
+批量反馈可以保留自然语言，不要求 OpenClaw 拆成多条。消费脚本会按当前展示文件展开：
+
+```bash
+python3 .codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py \
+  --push-file "05_流转区/50_待确认/待确认队列.md" \
+  "五条待确认全部确认转正"
+
+python3 .codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py \
+  --push-file "85_运行记录/前台推送-YYYY-MM-DD-HHMM.md" \
+  "前三条已读，但内容简略，没什么价值"
+```
+
 ## 消费队列
 
 预览待处理反馈，不写文件：
@@ -114,6 +126,7 @@ python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py -
 - OpenClaw 只调用入队脚本，不直接改来源笔记。
 - Codex 后台调用消费脚本。
 - `已读` 和 `补充想法` 只回写阅读思考。
+- `已读` 会同步标记来源 `阅读状态: 已读`；若用户明确说“没什么价值 / 无需沉淀”，来源会归档并从前台待反馈压力中退出。
 - `跳过` 只归档来源笔记，不删除原文。
 - `继续解析` 只记录补解析请求；实际 OCR、字幕或转写由后台后续执行。
 - `沉淀成提示词` 生成候选提示词，但不标记为已晋升。
