@@ -15,23 +15,23 @@
 点赞数: 12
 评论数: 0
 收藏数: 10
-分享数:
+分享数: 未知
 解析工具: 公开页面 HTML
 解析器: Douyin
 解析状态: 已解析
-内容质量: 需核验
-质量门禁: 转写主体已可读，但 Anthropic、Claude Code 等专有名词仍有误识别；推送或继续沉淀前需对照原视频快核。
+内容质量: 可推送
+质量门禁: 已通过转正门禁检查；摘要和关键点可直接参考，若引用时间线细节或逐句转写，仍建议对照原视频快核。
 外部转录链接:
 外部转录来源:
-字幕来源:
-字幕语言:
+字幕来源: 未发现
+字幕语言: 未发现
 内容摘录来源: 公开视频音频转写
 内容摘录后端: faster-whisper
 内容摘录字数: 683
-图片OCR来源:
-图片OCR后端:
-图片OCR模型:
-图片OCR字数:
+图片OCR来源: 不适用（纯视频）
+图片OCR后端: 不适用
+图片OCR模型: 不适用
+图片OCR字数: 0
 阅读状态: 已读
 处理状态: 已晋升
 关联项目: []
@@ -44,8 +44,7 @@
 入库状态: 已晋升
 ---
 
-# Anthropic工程师是怎样用Claude Code的? 这期视频来自 Anthropic 内部分享，
-架构师 Arno 用真实项目演示...
+# Anthropic工程师是怎样用Claude Code的? 这期视频来自 Anthropic 内部分享，架构师 Arno 用真实项目演示...
 
 ## 基础信息
 
@@ -59,8 +58,8 @@
 - 内容编号：7650756478957030690
 - 缩略图：https://p3-sign.douyinpic.com/tos-cn-p-0015/okTgInD9mAaPmkDDADgFwLojIf8JqXEBlAFesA~tplv-dy-360p.jpeg?lk3s=138a59ce&x-expires=1782550800&x-signature=b1rtGBSLpRhV9kOAGZW72CILZTw%3D&from=327834062&s=PackSourceEnum_AWEME_DETAIL&se=false&sc=origin_cover&biz_tag=aweme_video&l=202606131704532AC1EF274FBA03E6431E
 - 解析状态：已解析
-- 内容质量：需核验
-- 质量门禁：转写主体已可读，但 Anthropic、Claude Code 等专有名词仍有误识别；推送或继续沉淀前需对照原视频快核。
+- 内容质量：可推送
+- 质量门禁：已通过转正门禁检查；摘要和关键点可直接参考，若引用时间线细节或逐句转写，仍建议对照原视频快核。
 
 ## 平台信息
 
@@ -70,6 +69,7 @@
 - 点赞数：12
 - 评论数：0
 - 收藏数：10
+- 分享数：未知
 - 封面图：https://p11-sign.douyinpic.com/tos-cn-i-dy/5229a8122f5e42ddb1653bd747bda517~tplv-dy-resize-walign-adapt-aq:540:q75.webp?lk3s=138a59ce&x-expires=1782550800&x-signature=BMTeA6aNjOeZKxPhGLoH%2FhbrHyo%3D&from=327834062&s=PackSourceEnum_DOUYIN_REFLOW&se=false&sc=cover&biz_tag=aweme_video&l=20260613170454F64B796CBBC7DEE10F92
 
 ## 文案摘录
@@ -128,7 +128,7 @@ Reviewer 不必只看 diff，
 - 转写片段数：58
 - 估算字数：683
 
-说明：这里保存的是基于转写结果生成的摘要、关键点、完整时间线摘录和完整转写摘录；当前摘要与关键点已按明显术语误识别做最小修正，时间线和完整转写仍保留原始 ASR 痕迹，使用前需快核。
+说明：这里保存的是基于转写结果生成的摘要、关键点、完整时间线摘录和完整转写摘录；当前摘要与关键点已通过转正门禁检查，时间线和完整转写仍保留原始 ASR 痕迹，引用细节时需快核。
 
 ### 摘要
 
@@ -239,7 +239,6 @@ HTMR SPAC会不会更费Token
 它更像一条“Agent 工作环境设计原则”速记：需求采访、规格可视化、验证原生化，这三点比单纯堆 prompt 更值得复用。
 
 ## 阅读思考
-
 
 - 2026-06-13（OpenClaw/OpenClaw，补充想法）：晋升完成：Anthropic工程师是怎样用Claude Code的 - 已运行转正门禁检查（来源✅/解析✅/术语✅/可复用结论✅/知识关联✅），候选文件状态已从「候选/待确认/待核验」更新为「正式/已吸收/可信」，晋升为正式提示词
 - 已读；如后续继续使用其中结论，先回看原视频快核专有名词和个别句子。
