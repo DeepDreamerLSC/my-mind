@@ -178,11 +178,56 @@ python3 .codex/skills/inbox-triage/scripts/triage_inbox.py \
 python3 .codex/skills/backend-control/scripts/backend_health_check.py
 ```
 
-写入巡检报告：
+查看给自己看的后台总览：
+
+```bash
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --view dashboard
+```
+
+查看给 OpenClaw 的前台提醒稿：
+
+```bash
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --view openclaw
+```
+
+写入巡检报告和固定总览：
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 ```
+
+输出位置：
+
+- `85_运行记录/后台总控巡检-*.md`：完整证据报告。
+- `85_运行记录/后台总览/当前后台状态.md`：固定覆盖的后台状态面板。
+- `85_运行记录/后台总览/OpenClaw待提醒.md`：固定覆盖的秘书提醒稿。
+- `85_运行记录/后台总览/飞书仪表盘数据.json`：飞书多维表格同步数据。
+- `85_运行记录/后台总览/飞书仪表盘数据/*.csv`：按表拆分的 CSV。
+
+只刷新飞书仪表盘数据：
+
+```bash
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --export-dashboard-data
+```
+
+### 飞书仪表盘同步
+
+把后台总览数据同步到飞书多维表格，默认 dry-run，不写飞书：
+
+```bash
+python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py
+```
+
+真实同步时使用 OpenClaw 的飞书用户身份，并通过环境变量或本地配置提供 Base token：
+
+```bash
+MY_MIND_FEISHU_DASHBOARD_BASE_TOKEN='base_token' \
+python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-data --write
+```
+
+本地配置文件可放在 `85_运行记录/飞书仪表盘配置.local.json`，不要提交。同步脚本按 `记录键` 搜索远端记录，找到则更新，找不到才新增，避免重复行。
+
+主动同步时可以直接对 Codex 或 OpenClaw 说“同步飞书仪表盘”“刷新后台驾驶舱”或“更新多维表格看板”。后台会先刷新 `backend-control` 总览，再同步飞书多维表格。
 
 ### 解析质量修复
 
@@ -584,12 +629,18 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --write --app
 - `前台反馈与待确认消费`：每 6 小时执行一次，运行 `frontdesk-feedback --write --sync-feishu`，消费普通阅读反馈和候选待确认回复。
 - `前沿情报每日入箱`：每天早上运行前沿情报巡检并把通过门禁的候选入箱。
 - `项目进展每日巡检`：每天 20:30 生成项目进展候选报告，读取 git、运行记录和项目文件，但不自动 commit，也不自动 `--apply`。
+- `飞书仪表盘每日同步`：每天 07:00、14:00、21:00 刷新后台总览，并把结构化数据同步到飞书多维表格。
 
 自动化配置不在仓库内，运行记录写入 `85_运行记录/`。如果怀疑自动化停了，先跑：
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 ```
+
+日常不需要翻每条自动化的执行结果，优先看：
+
+- `85_运行记录/后台总览/当前后台状态.md`
+- `85_运行记录/后台总览/OpenClaw待提醒.md`
 
 ## OpenClaw 和 Codex 的分工
 

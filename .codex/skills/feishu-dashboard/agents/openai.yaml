@@ -1,0 +1,4 @@
+interface:
+  display_name: "飞书仪表盘"
+  short_description: "同步 my-mind 后台总览数据到飞书多维表格。"
+  default_prompt: "Use $feishu-dashboard to sync my-mind backend dashboard rows into Feishu Base without duplicate records."
