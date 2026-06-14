@@ -2,8 +2,8 @@
 
 - 页面类型：my-mind 前台精选单篇
 - 生成来源：Codex / feishu-publish bundle
-- 来源推送：`85_运行记录/前台推送-2026-06-13-1905.md`
-- 前台推送时间：2026-06-13 19:05:03 +0800
+- 来源推送：`85_运行记录/前台推送-2026-06-14-2101.md`
+- 前台推送时间：2026-06-14 21:01:12 +0800
 - 条目序号：3
 - 来源：YouTube / Tiago Forte / Tiago Forte
 - 状态：已分拣 / 未读 / 已解析
@@ -61,6 +61,69 @@ CHAPTERS:
 ## 质量提醒
 
 - 已通过前沿情报来源和分数门禁，可进入分拣和前台阅读候选；沉淀前仍需阅读原文核验。
+
+## 原文与完整解析
+
+- 来源笔记：`00_收件箱/2026-06-13 前沿情报 - The CODE Challenge Finale When the system has to pay off.md`
+- 接入状态：已接入来源正本
+- 正文字数：2076
+- 完整性提醒：来源笔记仍包含截断标记；这篇飞书页已尽量放入本地已有正本，但仍建议后续补全文稿或转写。
+
+### 基础信息
+
+- 来源：YouTube / Tiago Forte
+- 作者：Tiago Forte
+- 发布时间：2026-06-03
+- 原文链接：https://www.youtube.com/watch?v=aUq5yGISNTM
+- 情报门类：工作流与知识系统, 管理, 商业
+- 分数：25
+
+### 中文摘要
+
+这是 CODE 挑战赛的收官集。在此之前的四个星期是准备工作。 Carolina、Edvardo 和 Ethan 捕获、组织和提炼的每一条记录都是为本周发生的事情而存在的。
+表达是这套方法真正产生回报的阶段。第二大脑必须生产出外部世界可以看到、使用或购买的东西。 在此观看完整系列：https://www.youtube.com/playlist?list=PLVNXAaej57W4WfkckoQjuQbN-xKc2c2zA 认识参与者： 🏦 Carolina Lago（Notion · 金融培训师）
+https://www.youtube.com/@CarolinaLago_TACTIC ✍️ Edvardo Archer（Obsidian·作家兼执行教练）
+https://www.youtube.com/@eddy8301 🚀 Ethan Kohan（Google Drive·企业家）
+https://www.youtube.com/@UCCLDNExfDwAEU2aMHHJM7JQ 🗣️ 获得 Wispr Flow 的 30 天免费试用期：https://bit.ly/4tjC0sJ 📬 加入我的通讯，了解每周生产力和人工智能见解 https://bit.ly/4tQTspi 章节： 0:00 之前参加 CODE 挑战赛
+0:51 第 4 步：表达
+0:58 Carolina 在 48 小时内准备好研讨会
+1:58 爱德华多面对怪物
+5:03 伊森发送第一封冷邮件
+5:38 堪萨斯城两小时后关门
+6:14 系统消失，作品保留
+凌晨 3 点 7:19 爱德华多...
+
+### 原文摘录
+
+This is the season finale of the CODE Challenge. The four weeks before this one were preparation. Every note Carolina, Edvardo, and Ethan have captured, organized, and distilled exists for what happens this week.
+Express is the step where the method has to pay off. Where a Second Brain has to produce something the rest of the world can see, use, or buy.
+
+Watch the full series here: https://www.youtube.com/playlist?list=PLVNXAaej57W4WfkckoQjuQbN-xKc2c2zA
+
+Meet the participants:
+
+🏦 Carolina Lago (Notion · finance trainer)
+https://www.youtube.com/@CarolinaLago_TACTIC
+
+✍️ Edvardo Archer (Obsidian · writer & executive coach)
+https://www.youtube.com/@eddy8301
+
+🚀 Ethan Kohan (Google Drive · entrepreneur)
+https://www.youtube.com/@UCCLDNExfDwAEU2aMHHJM7JQ
+
+🗣️ Get an extended 30-day free trial of Wispr Flow: https://bit.ly/4tjC0sJ
+
+📬 Join my newsletter for weekly productivity and AI insights https://bit.ly/4tQTspi
+
+CHAPTERS: 
+0:00 Previously on the CODE Challenge
+0:51 Step 4: Express
+0:58 Carolina prepares a workshop in 48 hours
+1:58 Edvardo faces the monsters
+5:03 Ethan sends the first cold emails
+5:38 Kansas City closes in two hours
+6:14 The system fades, the work stays
+7:19 Edvardo at 3am...
 
 ## 回复给 OpenClaw
 

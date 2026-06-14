@@ -1,52 +1,55 @@
----
-类别: 收件箱
-资料类型: 社媒链接
-来源平台: 抖音
-标题: "黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋"
-作者或频道: TED英语演讲
-作者编号: 1804744600120199
-发布时间: 2026-06-11
-捕获时间: "2026-06-12 11:00:11 +0800"
-来源链接: "https://www.douyin.com/video/7649977367033955583?previous_page=app_code_link"
-原始链接: "https://v.douyin.com/R4OZcHbcqec/"
-内容编号: 7649977367033955583
-时长: "00:56"
-封面图: "https://p3-sign.douyinpic.com/tos-cn-p-0015/oUVU9iYYqQChAlAoWBKFzJtEQbDC1XAsJgfdeA~tplv-dy-360p.jpeg?lk3s=138a59ce&x-expires=1782439200&x-signature=cxj7uSej%2Bm81c0OjTZ8b82ag%2B9U%3D&from=327834062&s=PackSourceEnum_AWEME_DETAIL&se=false&sc=origin_cover&biz_tag=aweme_video&l=20260612105946F4A999E1FE50AD578590"
-点赞数: 8303
-评论数: 54
-收藏数: 3988
-分享数: 2268
-解析工具: 公开页面 HTML
-解析器: Douyin
-解析状态: 已解析
-内容质量: 可推送
-质量门禁: parse-quality-repair 已完成低风险术语和简体中文初校，可进入前台阅读；正式沉淀仍需转正门禁。
-外部转录链接:
-外部转录来源:
-字幕来源: 未发现
-字幕语言: 未发现
-内容摘录来源: 公开视频音频转写
-内容摘录后端: faster-whisper
-内容摘录字数: 166
-图片OCR来源: 不适用（纯视频）
-图片OCR后端: 不适用
-图片OCR模型: 不适用
-图片OCR字数: 0
-阅读状态: 已读
-处理状态: 待分拣
-关联项目: []
-关联领域: []
-主题: []
-标签:
-  - 社媒链接
-  - 抖音
-敏感状态: 未知
-入库状态: 已生成候选
----
-
 # 黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋
 
-## 基础信息
+- 页面类型：my-mind 前台精选单篇
+- 生成来源：Codex / feishu-publish bundle
+- 来源推送：`85_运行记录/前台推送-2026-06-14-2259.md`
+- 前台推送时间：2026-06-14 22:59:48 +0800
+- 条目序号：3
+- 来源：抖音 / TED英语演讲
+- 状态：已分拣 / 已读 / 已解析
+- 来源文件：`00_收件箱/2026-06-12 抖音 - 黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋.md`
+- 原文链接：https://www.douyin.com/video/7649977367033955583?previous_page=app_code_link
+- 分享链接：https://v.douyin.com/R4OZcHbcqec/
+- 为什么值得读：这是用户主动入箱且已读过的资料，适合优先判断是否继续沉淀，而不是再次提醒阅读。
+- 建议动作：已读过；直接回复“沉淀成提示词/资料库”或补一句读后判断，不值得保留就回复“跳过”。
+- 建议沉淀方向：`75_提示词库/Codex工作流/` 或 `10_项目/个人数据资产系统/`，优先判断是否能沉淀成可复用工作流。
+
+## 一句话摘要
+
+黄仁勋的建议很直接：如果今天还是学生，他会先学 AI，而且不只是会用，而是要学会如何与 ChatGPT、Gemini Pro、Grok 这类模型有效协作。他强调，和 AI 互动很像高质量提问，不能随意乱问；无论未来学什么学科、从事什么职业，都应该主动思考如何用 AI 帮自己完成工作。
+
+## 内容摘录
+
+**视频摘要**
+黄仁勋的建议很直接：如果今天还是学生，他会先学 AI，而且不只是会用，而是要学会如何与 ChatGPT、Gemini Pro、Grok 这类模型有效协作。他强调，和 AI 互动很像高质量提问，不能随意乱问；无论未来学什么学科、从事什么职业，都应该主动思考如何用 AI 帮自己完成工作。
+
+**关键点**
+- 如果今天还是学生，第一件事会是学习 AI。
+- 要学习如何与 ChatGPT、Gemini Pro、Grok 这类模型交互。
+- 与 AI 协作很像提出高质量问题，需要方法而不是乱问。
+- 把 AI 当助手来使用，本身需要经验和 prompt 技巧。
+- 无论学习数学、科学还是进入其他职业，都应该思考如何用 AI 做自己的工作。
+
+**文案摘录**
+黄仁勋给年轻人的建议：要学习如何用AI
+
+## 阅读时重点
+
+- 这条能否沉淀成一个可复用提示词、skill 或自动化流程？
+- 它对当前 `my-mind` 的入箱、分拣、反馈或飞书阅读闭环有什么直接启发？
+- 是否有一个可以马上加入任务清单的最小动作？
+
+## 质量提醒
+
+- parse-quality-repair 已完成低风险术语和简体中文初校，可进入前台阅读；正式沉淀仍需转正门禁。；本条包含图片 OCR，适合先读大意，沉淀前需要校对图片文字。
+
+## 原文与完整解析
+
+- 来源笔记：`00_收件箱/2026-06-12 抖音 - 黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋.md`
+- 接入状态：已接入来源正本
+- 正文字数：3738
+
+### 基础信息
 
 - 来源平台：抖音
 - 作者或频道：TED英语演讲
@@ -59,7 +62,7 @@
 - 缩略图：https://p3-sign.douyinpic.com/tos-cn-p-0015/oUVU9iYYqQChAlAoWBKFzJtEQbDC1XAsJgfdeA~tplv-dy-360p.jpeg?lk3s=138a59ce&x-expires=1782439200&x-signature=cxj7uSej%2Bm81c0OjTZ8b82ag%2B9U%3D&from=327834062&s=PackSourceEnum_AWEME_DETAIL&se=false&sc=origin_cover&biz_tag=aweme_video&l=20260612105946F4A999E1FE50AD578590
 - 解析状态：已解析
 
-## 平台信息
+### 平台信息
 
 - 真实链接：https://www.iesdouyin.com/share/video/7649977367033955583/?region=CN&mid=7649977334642461486&u_code=179c347i8&did=MS4wLjABAAAA_UUbSwft-xzxIlxZB2ny9YTFmXYRbp149sJyKSK5TYzlEJObv9ZDt9KHGN2g8uKN&iid=MS4wLjABAAAA3QbNiik-dts9EP3kEAdGF263thnEEttcO_BSdl7WDMgqRYncjubFfwYFamcd_KBw&with_sec_did=1&video_share_track_ver=&titleType=title&share_sign=S2c1.OBkOiA32BLMtDzO.ki8bn7roJZR8vdbkne03Fw-&share_version=390100&ts=1781232998&from_aid=1128&from_ssr=1&share_track_info=%7B%22link_description_type%22%3A%22%22%7D&utm_campaign=client_share&app=aweme&utm_medium=android&utm_source=copy
 - 作品编号：7649977367033955583
@@ -70,11 +73,11 @@
 - 分享数：2268
 - 封面图：https://p26-sign.douyinpic.com/tos-cn-i-0813/oMMe0FiAbAlu8qCdAUbvLRgEBfA0iAAj4CA1RI~tplv-dy-resize-walign-adapt-aq:720:q75.webp?lk3s=138a59ce&x-expires=1782439200&x-signature=nqOpNtIXk7WHdSgAumNy1kWMrWc%3D&from=327834062&s=PackSourceEnum_DOUYIN_REFLOW&se=false&sc=cover&biz_tag=aweme_video&l=20260612105946374D95A04112A55044F5
 
-## 文案摘录
+### 文案摘录
 
 黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋
 
-## 视频内容摘录
+### 视频内容摘录
 
 - 来源：公开视频音频转写
 - 后端：faster-whisper
@@ -85,11 +88,11 @@
 
 说明：这里保存的是基于转写结果生成的摘要、关键点、完整时间线摘录和完整转写摘录；公开短视频入箱默认会尝试生成这一部分。
 
-### 摘要
+#### 摘要
 
 黄仁勋的建议很直接：如果今天还是学生，他会先学 AI，而且不只是会用，而是要学会如何与 ChatGPT、Gemini Pro、Grok 这类模型有效协作。他强调，和 AI 互动很像高质量提问，不能随意乱问；无论未来学什么学科、从事什么职业，都应该主动思考如何用 AI 帮自己完成工作。
 
-### 关键点
+#### 关键点
 
 - 如果今天还是学生，第一件事会是学习 AI。
 - 要学习如何与 ChatGPT、Gemini Pro、Grok 这类模型交互。
@@ -97,7 +100,7 @@
 - 把 AI 当助手来使用，本身需要经验和 prompt 技巧。
 - 无论学习数学、科学还是进入其他职业，都应该思考如何用 AI 做自己的工作。
 
-### 时间线摘录
+#### 时间线摘录
 
 - 00:00：One of the most important things I would advise is: if I were a student today, the first thing I would do is learn AI.
 - 00:12：How do I learn to interact with ChatGPT? How do I learn to interact with Gemini Pro? How do I learn to interact with Grok?
@@ -105,7 +108,7 @@
 - 00:37：Asking AI to be an assistant requires expertise and artistry in how to prompt it.
 - 00:47：No matter the field or profession, I would ask myself: how can I use AI to do my job?
 
-### 转写摘录
+#### 转写摘录
 
 One of the most important things I would advise is, for example, if I were a student today,
 the first thing I would do is to learn AI.
@@ -122,59 +125,35 @@ And so if I were a student today, irrespective of whether it's for math or for s
 or chemistry or biology or it doesn't matter what field of science I'm going to go into
 or what profession I am, I'm going to ask myself, how can I use AI to do my job?
 
-## 标签和分类
+### 标签和分类
 
-### 分类
+#### 分类
 - 暂无
 
-### 标签
+#### 标签
 - dou上热门
 - 英语口语
 - 英语演讲
 - 英语
 - 黄仁勋
 
-## 字幕可用性
+### 字幕可用性
 
-### 手动字幕
+#### 手动字幕
 - 未发现
 
-### 自动字幕
+#### 自动字幕
 - 未发现
 
-## 为什么保存
+## 回复给 OpenClaw
 
-待补充。
+- `3 已读：你的想法`
+- `3 沉淀成提示词`
+- `3 跳过`
+- `3 继续解析`
 
-## 初步想法
+## 处理边界
 
-待补充。
-
-## 阅读思考
-
-- 已读，待补充读后判断。
-- 可记录：你认同/不认同的点、与已有知识的连接、想沉淀到哪里。
-- 如果和 Codex 交流过，可把交流后的新判断补在这里。
-
-## 后续处理建议
-
-- 判断是否需要进入资料库。
-- 如果有字幕或后续转写，再进行摘要、关键观点和待验证事实提取。
-- 如果与项目相关，再萃取到项目上下文、任务清单或问题清单。
-
-## 分拣记录
-
-- 2026-06-12：已自动分拣。建议去向：20_资料库/AI产品与工具/。核心价值：已经有公开视频转写摘录，适合先做资料库草稿和重点提取。下一步：先阅读原文，再在对话中反馈是否继续沉淀。
-- 2026-06-14：入箱门禁审核复核为短视频完整摘录，转为可推送；若后续需要逐句英文引用，再回看原视频抽核。
-
-## 解析修复记录
-
-- 2026-06-14 22:59:12 +0800：`parse-quality-repair` 已处理：更新质量门禁说明。
-
-## 沉淀记录
-
-- 2026-06-14：`knowledge-intake` 已生成prompt候选：[黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋](../75_提示词库/收集与录入/黄仁勋给年轻人的建议：要学习如何用AI%20#dou上热门%20#英语口语%20#英语演讲%20#英语%20#黄仁勋.md)。状态：候选，待确认。
-
-## 原始链接
-
-https://www.douyin.com/video/7649977367033955583?previous_page=app_code_link
+- 本页是本地 `my-mind` 的手机阅读镜像，不是长期知识源。
+- 原始状态、回链和沉淀记录仍以本地 Markdown 为准。
+- 未经用户确认，不自动晋升资料库、原子笔记、洞察或提示词库。
