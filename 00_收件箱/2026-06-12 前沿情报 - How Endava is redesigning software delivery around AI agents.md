@@ -11,8 +11,8 @@
 解析工具: frontier-watch
 解析器: RSS/Atom
 解析状态: 已解析
-内容质量: 可推送
-质量门禁: 已具备可读摘录，可进入分拣和前台阅读候选。
+内容质量: 需核验
+质量门禁: 来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 内容摘录来源: RSS/Atom 摘要中文译写
 内容摘录后端: frontier-watch
 内容摘录字数: 75
@@ -81,6 +81,10 @@ Learn how Endava is using AI agents, ChatGPT Enterprise, and Codex to accelerate
 ## 沉淀记录
 
 - 2026-06-13：Codex 后台合并生成候选资料：[Codex 在知识工作与企业交付中的扩展模式](../20_资料库/工作流与自动化/2026-06-13%20Codex%20在知识工作与企业交付中的扩展模式.md)。状态：候选，待确认。
+
+## 解析修复记录
+
+- 2026-06-15 13:19:00 +0800：门禁审核已将 `frontier-watch` 的 RSS/Atom 摘要条目降级为 `需核验`；仅凭摘要不能直接进入前台阅读候选。
 
 ## 原始链接
 
