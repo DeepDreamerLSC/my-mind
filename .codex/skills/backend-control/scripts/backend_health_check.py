@@ -29,6 +29,38 @@ DEFAULT_CONFIRMATION_QUEUE = DEFAULT_RUN_DIR / "待确认事项.jsonl"
 DEFAULT_DASHBOARD_DIR = DEFAULT_RUN_DIR / "后台总览"
 DEFAULT_DASHBOARD_DATA_FILE = DEFAULT_DASHBOARD_DIR / "飞书仪表盘数据.json"
 DEFAULT_DASHBOARD_CSV_DIR = DEFAULT_DASHBOARD_DIR / "飞书仪表盘数据"
+EXPECTED_PAUSED_AUTOMATIONS = {
+    "收件箱待分拣巡检": "已并入 my-mind 后台总控日更",
+    "前沿情报每日入箱": "已并入 my-mind 后台总控日更",
+    "前台反馈与待确认消费": "已并入 my-mind 后台总控日更",
+    "飞书仪表盘每日同步": "已并入 my-mind 后台总控日更",
+}
+WORKTREE_CATEGORY_LABELS = {
+    "skill_code": "技能代码与规则",
+    "inbox_state": "收件箱状态",
+    "flow_views": "流转区视图",
+    "dashboard_views": "后台固定视图",
+    "timestamp_records": "时间戳运行记录",
+    "feishu_pages": "飞书精选页",
+    "run_state": "运行状态文件",
+    "project_views": "项目管理视图",
+    "index_views": "索引视图",
+    "docs": "文档",
+    "other": "其他",
+}
+WORKTREE_CATEGORY_ACTIONS = {
+    "skill_code": "先验证，单独提交代码批次",
+    "inbox_state": "作为入箱/解析状态证据批量提交",
+    "flow_views": "作为可覆盖的流转视图随运行状态提交",
+    "dashboard_views": "作为固定看板快照随运行状态提交",
+    "timestamp_records": "作为当日运行证据批量提交，过旧重复草稿可归档",
+    "feishu_pages": "作为手机阅读发布证据提交，重复草稿需归档",
+    "run_state": "作为运行状态证据提交，注意检查本地配置和敏感字段",
+    "project_views": "按项目管理批次提交",
+    "index_views": "随对应知识/项目批次提交",
+    "docs": "随设计或使用说明批次提交",
+    "other": "人工判断归属后再提交",
+}
 
 
 def now_datetime() -> str:
@@ -326,15 +358,101 @@ def inspect_run_records(run_dir: Path) -> dict[str, Any]:
 
 def inspect_git() -> dict[str, Any]:
     try:
-        result = subprocess.run(["git", "status", "--short"], cwd=ROOT, text=True, capture_output=True, check=False)
+        result = subprocess.run(["git", "status", "--porcelain=v1", "-z"], cwd=ROOT, text=True, capture_output=True, check=False)
     except Exception as exc:  # noqa: BLE001
-        return {"error": str(exc), "dirty_count": 0, "entries": []}
-    entries = [line for line in result.stdout.splitlines() if line.strip()]
-    return {"dirty_count": len(entries), "entries": entries[:12]}
+        return {"error": str(exc), "dirty_count": 0, "entries": [], "categories": {}, "category_samples": [], "recommended_batches": []}
+    parsed_entries = parse_git_status_z(result.stdout)
+    categories = summarize_worktree_entries(parsed_entries)
+    display_entries = [f"{entry['status']} {entry['path']}" for entry in parsed_entries]
+    return {
+        "dirty_count": len(parsed_entries),
+        "entries": display_entries[:12],
+        "raw_entries": parsed_entries,
+        **categories,
+    }
+
+
+def parse_git_status_z(raw_output: str) -> list[dict[str, str]]:
+    chunks = [chunk for chunk in raw_output.split("\0") if chunk]
+    entries: list[dict[str, str]] = []
+    index = 0
+    while index < len(chunks):
+        chunk = chunks[index]
+        if len(chunk) < 4:
+            index += 1
+            continue
+        status = chunk[:2]
+        path = chunk[3:]
+        entry = {"status": status, "path": path, "category": classify_worktree_path(path)}
+        entries.append(entry)
+        if status[0] in {"R", "C"} or status[1] in {"R", "C"}:
+            index += 2
+        else:
+            index += 1
+    return entries
+
+
+def classify_worktree_path(path: str) -> str:
+    if path.startswith(".codex/skills/"):
+        return "skill_code"
+    if path.startswith("00_收件箱/"):
+        return "inbox_state"
+    if path.startswith("05_流转区/"):
+        return "flow_views"
+    if path.startswith("85_运行记录/后台总览/"):
+        return "dashboard_views"
+    if path.startswith("85_运行记录/飞书精选页/"):
+        return "feishu_pages"
+    if path.startswith("85_运行记录/") and re.search(r"-\d{4}-\d{2}-\d{2}", path):
+        return "timestamp_records"
+    if path.startswith("85_运行记录/"):
+        return "run_state"
+    if path.startswith("10_项目/"):
+        return "project_views"
+    if path.startswith("15_索引/"):
+        return "index_views"
+    if path == "README.md" or path.startswith("design/") or path.endswith("/SKILL.md"):
+        return "docs"
+    return "other"
+
+
+def summarize_worktree_entries(entries: list[dict[str, str]]) -> dict[str, Any]:
+    category_counter = Counter(entry["category"] for entry in entries)
+    samples_by_category: dict[str, list[str]] = {}
+    for entry in entries:
+        samples_by_category.setdefault(entry["category"], [])
+        if len(samples_by_category[entry["category"]]) < 3:
+            samples_by_category[entry["category"]].append(entry["path"])
+    category_samples = [
+        {
+            "category": category,
+            "label": WORKTREE_CATEGORY_LABELS.get(category, category),
+            "count": count,
+            "samples": samples_by_category.get(category, []),
+            "action": WORKTREE_CATEGORY_ACTIONS.get(category, WORKTREE_CATEGORY_ACTIONS["other"]),
+        }
+        for category, count in sorted(category_counter.items(), key=lambda item: (-item[1], item[0]))
+    ]
+    recommended_batches = [
+        f"{sample['label']}：{sample['count']} 项，{sample['action']}"
+        for sample in category_samples
+    ]
+    return {
+        "categories": dict(category_counter),
+        "category_samples": category_samples,
+        "recommended_batches": recommended_batches,
+    }
 
 
 def automation_name(automation: dict[str, Any]) -> str:
     return str(automation.get("name") or automation.get("id") or "未命名自动化")
+
+
+def expected_pause_reason(automation: dict[str, Any]) -> str:
+    status = str(automation.get("status") or "").upper()
+    if status == "ACTIVE":
+        return ""
+    return EXPECTED_PAUSED_AUTOMATIONS.get(automation_name(automation), "")
 
 
 def record_age_hours(record: dict[str, Any] | None) -> float | None:
@@ -359,7 +477,9 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     git = data["git"]
 
     automation_errors = [automation for automation in automations if automation.get("error")]
-    paused_automations = [automation for automation in automations if str(automation.get("status") or "").upper() != "ACTIVE"]
+    inactive_automations = [automation for automation in automations if str(automation.get("status") or "").upper() != "ACTIVE"]
+    planned_paused_automations = [automation for automation in inactive_automations if expected_pause_reason(automation)]
+    unexpected_inactive_automations = [automation for automation in inactive_automations if not expected_pause_reason(automation)]
     stale_runs: list[str] = []
     stale_thresholds = {
         "latest_triage": 8,
@@ -401,20 +521,30 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         codex_items.append(f"待沉淀队列中 {flow['待补判断']} 条仍需补解析或补判断，先走核验门禁。")
     if flow.get("待核验", 0):
         codex_items.append(f"待核验队列有 {flow['待核验']} 条，避免直接进入前台精选。")
+    if git.get("dirty_count", 0):
+        first_batch = ""
+        if git.get("recommended_batches"):
+            first_batch = f"优先看：{git['recommended_batches'][0]}"
+        codex_items.append(f"按运行产物治理分组收敛 {git['dirty_count']} 个未提交改动。{first_batch}".rstrip())
     if not codex_items:
         codex_items.append("后台暂无需要立即自动处理的阻塞项。")
 
     if automation_errors:
         risks.append(f"{len(automation_errors)} 个自动化配置读取失败。")
-    if paused_automations:
-        names = "、".join(automation_name(item) for item in paused_automations[:4])
-        risks.append(f"{len(paused_automations)} 个自动化未激活：{names}")
+    if unexpected_inactive_automations:
+        names = "、".join(automation_name(item) for item in unexpected_inactive_automations[:4])
+        risks.append(f"{len(unexpected_inactive_automations)} 个自动化意外未激活：{names}")
     if push_state.get("error"):
         risks.append(str(push_state["error"]))
     if stale_runs:
         risks.append("最近运行记录可能过期：" + "；".join(stale_runs[:5]))
     if git.get("dirty_count", 0):
-        risks.append(f"工作区有 {git.get('dirty_count', 0)} 个未提交改动，多数可能来自自动化运行记录。")
+        category_text = "；".join(
+            f"{sample['label']} {sample['count']}"
+            for sample in git.get("category_samples", [])[:4]
+        )
+        detail = f"：{category_text}" if category_text else ""
+        risks.append(f"工作区有 {git.get('dirty_count', 0)} 个未提交改动{detail}。")
     if inbox["low_quality_count"]:
         risks.append(f"{inbox['low_quality_count']} 条内容质量仍需核验，推送和转正前要继续门禁。")
     if not risks:
@@ -423,7 +553,7 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     if automation_errors or push_state.get("error"):
         level = "红色"
         summary = "存在配置或状态文件异常，需要 Codex 优先排查。"
-    elif confirmations["pending_count"] or feedback["pending_count"] or inbox["low_quality_count"] or paused_automations:
+    elif confirmations["pending_count"] or feedback["pending_count"] or inbox["low_quality_count"] or unexpected_inactive_automations:
         level = "黄色"
         summary = "后台链路可运行，但存在待确认、待核验或待消费事项。"
     else:
@@ -440,8 +570,11 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         "automation": {
             "total": len(automations),
             "active": sum(1 for automation in automations if str(automation.get("status") or "").upper() == "ACTIVE"),
-            "paused": len(paused_automations),
+            "paused": len(inactive_automations),
+            "planned_paused": len(planned_paused_automations),
+            "unexpected_inactive": len(unexpected_inactive_automations),
             "errors": len(automation_errors),
+            "planned_paused_names": [automation_name(item) for item in planned_paused_automations],
         },
     }
 
@@ -460,17 +593,45 @@ def build_dashboard(data: dict[str, Any]) -> str:
     feedback = data["feedback"]
     confirmations = data["confirmations"]
     push_state = data["push_state"]
+    git = data["git"]
 
     lines = [
         "# 当前后台状态",
         "",
         f"- 更新时间：{data['generated_at']}",
         f"- 状态：{digest['level']}，{digest['summary']}",
-        f"- 自动化：{digest['automation']['active']} 个启用 / {digest['automation']['total']} 个总数",
+        f"- 自动化：{digest['automation']['active']} 个启用 / {digest['automation']['total']} 个总数（计划暂停 {digest['automation']['planned_paused']}，异常暂停 {digest['automation']['unexpected_inactive']}）",
+        "",
+        "## 自动化节奏",
+        "",
+    ]
+    planned_names = digest["automation"].get("planned_paused_names") or []
+    if planned_names:
+        lines.append(f"- 计划暂停：{'、'.join(planned_names)}，均已并入 `my-mind 后台总控日更`。")
+    else:
+        lines.append("- 计划暂停：0 个。")
+    if digest["automation"]["unexpected_inactive"]:
+        lines.append(f"- 异常暂停：{digest['automation']['unexpected_inactive']} 个，需要检查自动化配置。")
+    else:
+        lines.append("- 异常暂停：0 个。")
+    lines.extend([
+        "",
+        "## 工作区运行产物治理",
+        "",
+        f"- 未提交改动：{git.get('dirty_count', 0)} 个",
+    ])
+    if git.get("category_samples"):
+        for sample in git["category_samples"][:6]:
+            examples = "、".join(f"`{path}`" for path in sample.get("samples", [])[:2])
+            suffix = f"；例：{examples}" if examples else ""
+            lines.append(f"- {sample['label']}：{sample['count']} 项，{sample['action']}{suffix}")
+    else:
+        lines.append("- 工作区干净，无需治理。")
+    lines.extend([
         "",
         "## 需要你处理",
         "",
-    ]
+    ])
     append_list(lines, digest["user_items"])
     lines.extend(["", "## Codex 后台应处理", ""])
     append_list(lines, digest["codex_items"])
@@ -649,6 +810,8 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     add_metric("自动化总数", digest["automation"]["total"], category="自动化")
     add_metric("启用自动化", digest["automation"]["active"], category="自动化")
     add_metric("暂停自动化", digest["automation"]["paused"], category="自动化")
+    add_metric("计划暂停自动化", digest["automation"]["planned_paused"], category="自动化")
+    add_metric("异常暂停自动化", digest["automation"]["unexpected_inactive"], category="自动化")
     add_metric("自动化错误", digest["automation"]["errors"], category="自动化")
     add_metric("收件箱总数", inbox["total"], category="收件箱")
     add_metric("低质量解析", inbox["low_quality_count"], category="收件箱")
@@ -685,12 +848,17 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
             )
 
     for automation in data["automations"]:
+        pause_reason = expected_pause_reason(automation)
+        status = str(automation.get("status") or "UNKNOWN")
+        plan_status = "按计划暂停" if pause_reason else ("启用" if status.upper() == "ACTIVE" else "异常未激活")
         rows["automations"].append(
             {
                 "记录键": f"automation:{automation_name(automation)}",
                 "生成时间": generated_at,
                 "自动化": automation_name(automation),
-                "状态": automation.get("status") or "UNKNOWN",
+                "状态": status,
+                "计划状态": plan_status,
+                "暂停原因": pause_reason,
                 "频率": compact_rrule(str(automation.get("rrule") or "")),
                 "原始频率": automation.get("rrule") or "",
                 "模型": automation.get("model") or "",
@@ -880,7 +1048,9 @@ def build_report(data: dict[str, Any]) -> str:
         name = automation.get("name") or automation.get("id")
         status = automation.get("status", "UNKNOWN")
         rrule = automation.get("rrule", "")
-        lines.append(f"- {name}：{status}，{rrule}")
+        reason = expected_pause_reason(automation)
+        suffix = f"，计划暂停：{reason}" if reason else ""
+        lines.append(f"- {name}：{status}，{rrule}{suffix}")
     lines.extend(["", "## 收件箱状态", ""])
     lines.append(f"- 处理状态：{json.dumps(inbox['status'], ensure_ascii=False)}")
     lines.append(f"- 解析状态：{json.dumps(inbox['parse_status'], ensure_ascii=False)}")
@@ -922,6 +1092,17 @@ def build_report(data: dict[str, Any]) -> str:
     lines.extend(["", "## 工作区", ""])
     git = data["git"]
     lines.append(f"- 未提交改动数量：{git.get('dirty_count', 0)}")
+    if git.get("category_samples"):
+        lines.extend(["", "### 治理分组", ""])
+        for sample in git["category_samples"]:
+            examples = "、".join(f"`{path}`" for path in sample.get("samples", [])[:3])
+            suffix = f"；例：{examples}" if examples else ""
+            lines.append(f"- {sample['label']}：{sample['count']} 项。{sample['action']}{suffix}")
+    if git.get("recommended_batches"):
+        lines.extend(["", "### 建议提交批次", ""])
+        for batch in git["recommended_batches"][:8]:
+            lines.append(f"- {batch}")
+    lines.extend(["", "### 原始状态样例", ""])
     for entry in git.get("entries", [])[:8]:
         lines.append(f"- `{entry}`")
     return "\n".join(lines).rstrip() + "\n"

@@ -178,6 +178,8 @@ python3 .codex/skills/inbox-triage/scripts/triage_inbox.py \
 python3 .codex/skills/backend-control/scripts/backend_health_check.py
 ```
 
+后台总控会区分“计划暂停”和“异常暂停”：已并入 `my-mind 后台总控日更` 的旧自动化不再算风险。同时会把当前工作区改动按技能代码、收件箱状态、流转区视图、后台固定视图、时间戳运行记录、飞书精选页等分组，方便后续分批提交。
+
 查看给自己看的后台总览：
 
 ```bash

@@ -622,6 +622,9 @@ def needs_verification(result: TriageResult) -> bool:
     return any(
         keyword in risk_text
         for keyword in [
+            "内容质量门禁",
+            "需核验",
+            "需继续解析",
             "需要确认",
             "需要校对",
             "事实核验",

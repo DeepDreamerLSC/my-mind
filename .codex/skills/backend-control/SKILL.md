@@ -56,6 +56,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 ## 检查范围
 
 - Codex App 自动化配置和频率。
+- 计划暂停的自动化是否已并入总控日更；只有意外未激活才进入风险。
 - `05_流转区/` 的待读、待沉淀、待核验数量；待沉淀会继续拆成可消费、已有候选待确认、待补判断三类，避免把已生成候选的内容重复沉淀。
 - `00_收件箱/` 的处理状态、解析质量和低质量条目；已归档且明确为重复证据的低质量条目不计入活跃异常。
 - `parse-quality-repair` 的最近运行记录和待核验修复状态。
@@ -64,6 +65,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 - `85_运行记录/前台推送状态.json` 的冷却、已推送未反馈和重复触达风险。
 - 最近的分拣、门禁、前台推送、飞书发布、飞书同步和反馈消费记录。
 - 当前 git 工作区是否存在未提交改动。
+- 当前 git 工作区改动的治理分组，例如技能代码、收件箱状态、流转区视图、后台固定视图、时间戳运行记录和飞书精选页。
 
 ## 输出原则
 
@@ -76,6 +78,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 - 若发现低质量解析，不建议进入前台推送。
 - OpenClaw 只读取 `OpenClaw待提醒.md` 进行前台沟通，不转发完整巡检报告。
 - 飞书仪表盘同步只读取结构化数据文件，不重复扫描仓库事实源。
+- 工作区治理只分类和建议分批，不自动提交、不自动回滚。
 
 ## 工作边界
 
