@@ -214,6 +214,21 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --export-dashboard-data
 ```
 
+### 运行产物治理
+
+当自动化生成很多运行记录、队列视图和飞书精选页时，先生成治理计划，再分批提交：
+
+```bash
+python3 .codex/skills/run-state-cleanup/scripts/plan_run_state_cleanup.py --write
+```
+
+输出位置：
+
+- `85_运行记录/运行产物治理-*.md`：本轮完整治理报告。
+- `85_运行记录/后台总览/运行产物治理.md`：固定覆盖的治理面板。
+
+它只做分类、风险提示和提交批次建议，不自动删除、回滚、提交或推送。`*.local.json`、`.env` 和 token 类路径只会进入风险提醒，默认不提交。
+
 ### 建议分析
 
 把后台总览、项目巡检、待确认队列和项目文件汇总成优先级行动建议：
@@ -267,6 +282,10 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-
 
 主动同步时可以直接对 Codex 或 OpenClaw 说“同步飞书仪表盘”“刷新后台驾驶舱”或“更新多维表格看板”。后台会先刷新 `backend-control` 总览，再刷新 `advice-analysis` 当前行动建议，最后同步飞书多维表格。
 
+飞书仪表盘现在包含一张聚合表 `后台驾驶舱`，用于一屏查看系统健康、用户待决策、前台触达、解析质量、流转库存和工作区治理。明细表仍保留在 `后台指标`、`行动队列`、`解析质量`、`待确认候选` 等表里。
+
+如果飞书端新表不能通过中文表名同步，先用 `lark-cli base +table-list` 找到 table id，再在本地 `85_运行记录/飞书仪表盘配置.local.json` 里增加 `table_map.cockpit`。这个 `.local.json` 已被 gitignore 忽略，不要提交。
+
 ### 解析质量修复
 
 低质量解析队列不要直接进入前台推送或候选转正。先让后台修复明显问题：
@@ -286,7 +305,7 @@ python3 .codex/skills/parse-quality-repair/scripts/repair_parse_quality.py --wri
 - `05_流转区/40_待核验/解析质量修复队列.md`
 - `85_运行记录/解析质量修复-*.md`
 
-第一版只自动修复低风险问题，例如繁体转简体、明显术语误识别、质量门禁说明缺失。RSS/Atom 摘要、截断摘录、过短转写、需要重抓、补 OCR、补字幕或长视频重转写的条目会继续留在待核验队列，不会进入前台精选、飞书发布或长期知识转正。
+第一版只自动修复低风险问题，例如繁体转简体、明显术语误识别、质量门禁说明缺失。RSS/Atom 摘要、截断摘录、过短转写、需要重抓、补 OCR、补字幕或长视频重转写的条目会继续留在待核验队列，不会进入前台精选、飞书发布或长期知识转正。待核验队列会按解析债务分型：`可自动补全文`、`需重抓转写`、`需补 OCR`、`需重新解析`、`证据过短`、`需人工判断`，方便后台优先处理可自动修复的债务。
 
 ### 生成前台推送
 
@@ -375,7 +394,7 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py --publi
 python3 .codex/skills/feishu-publish/scripts/build_openclaw_feishu_message.py
 ```
 
-`prepare_openclaw_feishu_message.py` 会输出飞书知识库精选索引链接、少量重点标题和需要你确认的候选知识。它会自动补齐飞书发布链路；如果发布失败，OpenClaw 应把失败原因转成短提示，不应退回发送原文链接或前台推送 Markdown。
+`prepare_openclaw_feishu_message.py` 会输出飞书知识库精选索引链接、少量重点标题和需要你确认的候选知识决策卡。它会自动补齐飞书发布链路；如果发布失败，OpenClaw 应把失败原因转成短提示，不应退回发送原文链接或前台推送 Markdown。脚本生成消息不等于已经触达用户；OpenClaw 实际发送后，收到回复必须写入 `前台反馈队列.jsonl`。
 
 ### 记录和消费前台反馈
 
@@ -620,6 +639,7 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --write --app
 
 项目进展巡检不是纯汇总。报告必须包含 `Codex 项目分析`：
 
+- 项目判断：本轮真正推进、当前阻塞、下个最小动作、噪声和判断置信度。
 - 阶段判断：当前项目推进到哪里。
 - 有效进展：哪些变化真的代表项目推进。
 - 证据噪声：哪些只是自动刷新、临时文件或过程记录。
@@ -677,8 +697,8 @@ python3 .codex/skills/project-progress/scripts/project_progress.py --write --app
 
 当前 Codex App 里只保留两个启用的后台自动化，避免多个高频任务冲刷会话：
 
-- `my-mind 后台总控日更`：每天 07:10 执行一次，串联反馈消费、前沿情报入箱、解析质量修复、收件箱分拣、前台推送、飞书精选发布、后台总览、行动建议和飞书仪表盘同步。最终只输出 5 行以内摘要。
-- `项目组合每日巡检`：每天 20:30 分别生成 `my-mind` 和 `edu-agent` 项目进展候选报告，读取 git、运行记录和项目文件，但不自动 commit，也不自动 `--apply`。最终只输出 5 行以内摘要。
+- `my-mind 后台总控日更`：每天 07:10 执行一次，串联反馈消费、前沿情报入箱、解析质量修复、收件箱分拣、前台推送、飞书精选发布、运行产物治理、后台总览、行动建议和飞书仪表盘同步。最终只输出 5 行以内摘要。
+- `项目组合每日巡检`：每天 20:30 分别生成 `my-mind` 和 `edu-agent` 项目进展候选报告，读取 git、运行记录和项目文件，并输出 `项目判断`，但不自动 commit，也不自动 `--apply`。最终只输出 5 行以内摘要。
 
 以下旧自动化已暂停，能力已并入 `my-mind 后台总控日更`：
 
@@ -697,6 +717,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 日常不需要翻每条自动化的执行结果，优先看：
 
 - `85_运行记录/后台总览/当前后台状态.md`
+- `85_运行记录/后台总览/运行产物治理.md`
 - `85_运行记录/后台总览/OpenClaw待提醒.md`
 - `85_运行记录/后台总览/当前行动建议.md`
 - `85_运行记录/后台总览/OpenClaw行动建议.md`

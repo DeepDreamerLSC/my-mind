@@ -112,6 +112,43 @@ def section_between(text: str, heading: str) -> str:
     return text[start:end].strip()
 
 
+def parse_confirmation_heading(line: str) -> dict[str, str]:
+    match = re.match(r"^(?P<index>\d+)\.\s+(?P<title>.+)$", line.strip())
+    if not match:
+        return {}
+    title = match.group("title").strip()
+    parts = [part.strip() for part in title.split("｜") if part.strip()]
+    parsed = {
+        "index": match.group("index"),
+        "title": parts[0] if parts else title,
+        "type": parts[1] if len(parts) > 1 else "",
+        "priority": parts[2] if len(parts) > 2 else "",
+    }
+    return parsed
+
+
+def render_confirmation_card(card: dict[str, str]) -> str:
+    index = card.get("index") or "?"
+    lines = [f"决策卡 {index}｜{card.get('title') or '未命名候选'}"]
+    meta = " / ".join(value for value in [card.get("type", ""), card.get("priority", "")] if value)
+    if meta:
+        lines.append(f"   类型：{meta}")
+    if card.get("candidate"):
+        lines.append(f"   候选：{card['candidate']}")
+    if card.get("source"):
+        lines.append(f"   来源：{card['source']}")
+    suggestion = card.get("suggestion") or "建议先确认是否转正；不确定就回复继续核验或调整分类。"
+    lines.append(f"   建议：{suggestion}")
+    replies = card.get("replies") or ""
+    if replies and not re.match(r"^\d+\s+", replies.strip()):
+        reply_parts = [part.strip() for part in replies.split("/") if part.strip()]
+        replies = " / ".join(f"{index} {part}" for part in reply_parts)
+    if not replies:
+        replies = f"{index} 确认转正 / {index} 继续核验 / {index} 调整分类：资料库 / {index} 跳过"
+    lines.append(f"   可回复：{replies}")
+    return "\n".join(lines)
+
+
 def load_confirmation_items(path: Path, max_items: int) -> list[str]:
     if max_items <= 0 or not path.exists():
         return []
@@ -120,21 +157,30 @@ def load_confirmation_items(path: Path, max_items: int) -> list[str]:
     if not section:
         return []
     items: list[str] = []
-    current: list[str] = []
+    current: dict[str, str] | None = None
     for raw_line in section.splitlines():
         line = raw_line.rstrip()
         if not line.strip():
             continue
         if re.match(r"^\d+\.\s+", line):
             if current:
-                items.append("\n".join(current))
-                current = []
-            current.append(line.strip())
+                items.append(render_confirmation_card(current))
+            current = parse_confirmation_heading(line)
             continue
-        if current and ("候选：" in line or "可回复：" in line):
-            current.append("   " + line.strip().lstrip("- "))
+        if not current:
+            continue
+        clean = line.strip().lstrip("- ").strip()
+        for field, key in [
+            ("候选：", "candidate"),
+            ("来源：", "source"),
+            ("可回复：", "replies"),
+            ("建议：", "suggestion"),
+        ]:
+            if clean.startswith(field):
+                current[key] = clean.removeprefix(field).strip()
+                break
     if current:
-        items.append("\n".join(current))
+        items.append(render_confirmation_card(current))
     return items[:max_items]
 
 
@@ -207,7 +253,7 @@ def render_message(
         for highlight in highlights:
             lines.extend(["", highlight])
     if confirmation_items:
-        lines.extend(["", "需要你确认："])
+        lines.extend(["", "需要你确认（决策卡）："])
         for item in confirmation_items:
             lines.extend(["", item])
     lines.extend(
@@ -218,6 +264,9 @@ def render_message(
             "序号 沉淀成提示词",
             "序号 跳过",
             "序号 继续解析",
+            "序号 确认转正",
+            "序号 继续核验",
+            "序号 调整分类：资料库",
         ]
     )
     return "\n".join(lines).strip()

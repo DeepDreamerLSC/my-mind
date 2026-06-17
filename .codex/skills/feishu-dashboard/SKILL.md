@@ -52,6 +52,7 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-
 
 脚本默认把本地表同步到同名飞书表：
 
+- `后台驾驶舱`
 - `后台指标`
 - `指标历史`
 - `行动队列`
@@ -70,6 +71,7 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-
   "base_token": "base_token",
   "identity": "user",
   "table_map": {
+    "cockpit": "后台驾驶舱或 tbl...",
     "metrics": "后台指标",
     "metric_history": "指标历史"
   }
@@ -79,6 +81,8 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --refresh-
 默认配置路径：
 
 - `85_运行记录/飞书仪表盘配置.local.json`
+
+如果 `lark-cli 1.0.32` 无法通过表名找到新建的 `后台驾驶舱`，先用 `lark-cli base +table-list` 找到 table id，再把 `table_map.cockpit` 写到本地 `.local.json`。不要把这个配置提交。
 
 ## 去重原则
 
@@ -112,9 +116,10 @@ python3 .codex/skills/feishu-dashboard/scripts/sync_dashboard_rows.py --init-tab
 
 第一版建议在飞书多维表格里手工搭仪表盘，数据由脚本维护：
 
+- 顶部总览：用 `后台驾驶舱` 做一屏状态表，展示系统健康、用户待决策、前台触达、解析质量、流转库存和工作区治理。
 - 指标卡：后台状态指数、待确认候选、待读、待沉淀、待核验、低质量解析、已推送未反馈。
 - 折线图：`指标历史` 中近 7/30 天的关键指标。
 - 漏斗图：`流转队列` 或 `后台指标` 中收件箱到转正同步的数量。
-- 表格：`当前行动建议`、`行动队列`、`待确认候选`、`解析质量`。
+- 表格：`后台驾驶舱`、`当前行动建议`、`行动队列`、`待确认候选`、`解析质量`。
 
 后续如果仪表盘布局稳定，再考虑让脚本自动创建 dashboard block。

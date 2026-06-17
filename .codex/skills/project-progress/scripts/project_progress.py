@@ -83,6 +83,16 @@ class ProgressAnalysis:
     apply_recommendation: str = ""
 
 
+@dataclass
+class ProjectJudgement:
+    confidence: str
+    real_progress: list[str] = field(default_factory=list)
+    blockers: list[str] = field(default_factory=list)
+    smallest_next_actions: list[str] = field(default_factory=list)
+    noise_to_ignore: list[str] = field(default_factory=list)
+    codex_take: str = ""
+
+
 def resolve_project(value: str) -> ProjectConfig:
     project = PROJECTS.get(value)
     if project is None:
@@ -390,6 +400,47 @@ def infer_progress_candidates(evidence: ProgressEvidence) -> list[str]:
     return candidates or ["暂无明显项目进展候选；可只保留为巡检记录。"]
 
 
+def build_project_judgement(evidence: ProgressEvidence, analysis: ProgressAnalysis) -> ProjectJudgement:
+    grouped = summarize_status(evidence.status_items, evidence.project)
+    real_progress = [item for item in analysis.meaningful_progress if "暂无足够稳定" not in item][:3]
+    if not real_progress:
+        real_progress = ["本轮还不能证明有稳定项目推进，当前更像运行证据和工作区整理阶段。"]
+
+    blockers = [item for item in analysis.risks if "暂无明显" not in item][:3]
+    if grouped.get("运行记录") and not evidence.commits:
+        blockers.append("运行记录较多但缺少近期 commit，项目状态可能还没有闭合为可交付批次。")
+    if not blockers:
+        blockers = ["暂无明确阻塞；下一步重点是把候选结论和运行证据闭合。"]
+
+    smallest_next_actions = analysis.next_actions[:3] or ["继续观察，不回写项目进展。"]
+    noise_to_ignore = [item for item in analysis.evidence_noise if "未发现明显" not in item][:3]
+    if not noise_to_ignore:
+        noise_to_ignore = ["没有明显需要剔除的噪声，但提交前仍要区分代码、文档和运行产物。"]
+
+    if evidence.commits and len(evidence.status_items) < 15:
+        confidence = "高"
+    elif evidence.commits or len(evidence.status_items) < 30:
+        confidence = "中"
+    else:
+        confidence = "低"
+
+    if confidence == "低":
+        take = "当前证据噪声偏高，先分批整理工作区，再把真正进展写入项目文件。"
+    elif evidence.project.key == "edu-agent":
+        take = "优先判断 edu-agent 的代码变化是否已经形成可复核交付，而不是只记录文件列表。"
+    else:
+        take = "优先收敛后台自动化和前台触达闭环，再扩大资料规模。"
+
+    return ProjectJudgement(
+        confidence=confidence,
+        real_progress=list(dict.fromkeys(real_progress)),
+        blockers=list(dict.fromkeys(blockers)),
+        smallest_next_actions=list(dict.fromkeys(smallest_next_actions)),
+        noise_to_ignore=list(dict.fromkeys(noise_to_ignore)),
+        codex_take=take,
+    )
+
+
 def extend_bullets(lines: list[str], items: list[str]) -> None:
     lines.extend(f"- {item}" for item in items)
 
@@ -398,6 +449,7 @@ def render_report(evidence: ProgressEvidence, *, since_hours: int, apply: bool) 
     generated = now().strftime("%Y-%m-%d %H:%M:%S %z")
     grouped = summarize_status(evidence.status_items, evidence.project)
     analysis = analyze_progress(evidence)
+    judgement = build_project_judgement(evidence, analysis)
     lines = [
         "---",
         "类别: 运行记录",
@@ -421,9 +473,28 @@ def render_report(evidence: ProgressEvidence, *, since_hours: int, apply: bool) 
         f"- 项目文件：{len(evidence.project_files)}",
         "- 自动 commit：否",
         "",
-        "## 进展候选",
+        "## 项目判断",
+        "",
+        f"- 判断置信度：{judgement.confidence}",
+        f"- Codex 判断：{judgement.codex_take}",
+        "",
+        "### 本轮真正推进",
         "",
     ]
+    extend_bullets(lines, judgement.real_progress)
+    lines.extend(["", "### 当前阻塞", ""])
+    extend_bullets(lines, judgement.blockers)
+    lines.extend(["", "### 下个最小动作", ""])
+    extend_bullets(lines, judgement.smallest_next_actions)
+    lines.extend(["", "### 不应当算作进展的噪声", ""])
+    extend_bullets(lines, judgement.noise_to_ignore)
+    lines.extend(
+        [
+            "",
+        "## 进展候选",
+        "",
+        ]
+    )
     lines.extend(f"- {item}" for item in infer_progress_candidates(evidence))
     lines.extend(["", "## Codex 项目分析", ""])
     lines.extend(["### 阶段判断", "", f"- {analysis.stage_judgement}", ""])

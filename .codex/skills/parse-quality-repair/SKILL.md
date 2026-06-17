@@ -47,8 +47,10 @@ It automatically performs only low-risk repairs:
 - Fill or tighten `内容质量` and `质量门禁` when the note has enough readable evidence.
 - Append `## 解析修复记录` to the source note.
 - Mark summary-only or truncated sources as `内容质量: 需核验` and keep them out of frontdesk push, Feishu publish, and candidate promotion.
+- Classify unresolved parse debt as `可自动补全文`, `需重抓转写`, `需补 OCR`, `需重新解析`, `证据过短`, or `需人工判断`.
 
 It does not redownload media, run long transcriptions, or promote knowledge in v1. Items needing heavy work remain in the repair queue.
+The debt classification is intended to help the backend automation pick the next safest repair path; it is not a promotion decision.
 
 ## Outputs
 

@@ -353,6 +353,7 @@ def inspect_run_records(run_dir: Path) -> dict[str, Any]:
         "latest_feedback": latest_file("反馈消费-*.md", run_dir),
         "latest_feishu_publish": latest_file("飞书精选页/索引/*.md", run_dir) or latest_file("飞书阅读页/飞书阅读页-*.md", run_dir),
         "latest_feishu_sync": latest_file("飞书知识库同步页/*.md", run_dir),
+        "latest_run_state_cleanup": latest_file("运行产物治理-*.md", run_dir),
     }
 
 
@@ -505,7 +506,7 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         openclaw_items.append(f"提醒用户处理 {confirmations['pending_count']} 条待确认候选，优先展示标题、类型、候选文件和可回复动作。")
     if push_state.get("waiting_feedback"):
         user_items.append(f"{push_state.get('waiting_feedback', 0)} 条前台内容已推送但仍未反馈，可由 OpenClaw 分批展示，不要求一次处理完。")
-        openclaw_items.append("用飞书精选链接或待确认队列做前台触达，不要让用户翻自动化日志。")
+        openclaw_items.append("用飞书精选链接或待确认队列做前台触达，不要让用户翻自动化日志。发送后如收到回复，必须写入前台反馈队列。")
     if not user_items:
         user_items.append("暂无必须由你立即处理的后台事项。")
 
@@ -536,6 +537,8 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         risks.append(f"{len(unexpected_inactive_automations)} 个自动化意外未激活：{names}")
     if push_state.get("error"):
         risks.append(str(push_state["error"]))
+    if push_state.get("waiting_feedback", 0) >= 5 and feedback["pending_count"] == 0:
+        risks.append("已推送未反馈较多但反馈队列为空，需要观察 OpenClaw 是否实际完成前台触达；脚本生成不等于消息已发送。")
     if stale_runs:
         risks.append("最近运行记录可能过期：" + "；".join(stale_runs[:5]))
     if git.get("dirty_count", 0):
@@ -725,6 +728,13 @@ def build_openclaw_brief(data: dict[str, Any]) -> str:
             f"- 24 小时冷却中：{push_state.get('cooling', 0)} 条",
         ]
     )
+    if push_state.get("waiting_feedback", 0):
+        lines.extend(
+            [
+                "- 触达观察：脚本生成前台消息不等于用户已收到；如果你尚未实际发送，请先发送飞书精选链接或决策卡，再等待反馈。",
+                "- 回写要求：收到用户回复后，必须调用 `frontdesk-feedback` 入队脚本，不要只在聊天里口头确认。",
+            ]
+        )
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -776,6 +786,7 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     push_state = data["push_state"]
     git = data["git"]
     rows: dict[str, list[dict[str, Any]]] = {
+        "cockpit": [],
         "metrics": [],
         "metric_history": [],
         "actions": [],
@@ -826,6 +837,85 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     add_metric("已推送未反馈", push_state.get("waiting_feedback", 0), category="前台")
     add_metric("24小时冷却中", push_state.get("cooling", 0), category="前台")
     add_metric("工作区未提交改动", git.get("dirty_count", 0), category="工程")
+
+    def add_cockpit(
+        module: str,
+        value: Any,
+        *,
+        state: str,
+        conclusion: str,
+        owner: str,
+        next_action: str,
+        source: str,
+    ) -> None:
+        rows["cockpit"].append(
+            {
+                "记录键": f"cockpit:{module}",
+                "生成时间": generated_at,
+                "模块": module,
+                "数值": numeric(value),
+                "状态": state,
+                "结论": conclusion,
+                "责任方": owner,
+                "下一步": next_action,
+                "来源": source,
+            }
+        )
+
+    add_cockpit(
+        "系统健康",
+        status_score(digest["level"]),
+        state=digest["level"],
+        conclusion=digest["summary"],
+        owner="Codex",
+        next_action="继续按总控日更节奏巡检，异常时先看当前后台状态。",
+        source="backend-control",
+    )
+    add_cockpit(
+        "用户待决策",
+        confirmations["pending_count"],
+        state="需处理" if confirmations["pending_count"] else "正常",
+        conclusion=f"{confirmations['pending_count']} 条候选等待确认。",
+        owner="用户/OpenClaw",
+        next_action="OpenClaw 用决策卡展示候选；用户回复确认转正、继续核验、调整分类或跳过。",
+        source="待确认事项.jsonl",
+    )
+    add_cockpit(
+        "前台触达",
+        push_state.get("waiting_feedback", 0),
+        state="需观察" if push_state.get("waiting_feedback", 0) else "正常",
+        conclusion=f"{push_state.get('waiting_feedback', 0)} 条已推送未反馈。",
+        owner="OpenClaw",
+        next_action="确认飞书精选链接是否已真实发送；收到回复后写入前台反馈队列。",
+        source="前台推送状态.json",
+    )
+    add_cockpit(
+        "解析质量",
+        inbox["low_quality_count"],
+        state="需修复" if inbox["low_quality_count"] else "正常",
+        conclusion=f"{inbox['low_quality_count']} 条活跃低质量或需核验解析。",
+        owner="Codex",
+        next_action="先运行解析质量修复；低质量条目不进入飞书精选和长期转正。",
+        source="00_收件箱",
+    )
+    add_cockpit(
+        "流转库存",
+        flow["待沉淀"],
+        state="需分流" if flow["待沉淀"] else "正常",
+        conclusion=f"待沉淀 {flow['待沉淀']} 条，其中可消费 {flow['待沉淀待消费']} 条。",
+        owner="Codex/OpenClaw",
+        next_action="Codex 只消费可消费项；已有候选交给 OpenClaw 提醒确认。",
+        source="05_流转区",
+    )
+    add_cockpit(
+        "工作区治理",
+        git.get("dirty_count", 0),
+        state="需整理" if git.get("dirty_count", 0) else "正常",
+        conclusion=f"{git.get('dirty_count', 0)} 个未提交改动。",
+        owner="Codex",
+        next_action="按运行产物治理报告分批提交，代码与运行状态分开。",
+        source="git status",
+    )
 
     for owner, values in [
         ("用户", digest["user_items"]),
@@ -959,6 +1049,7 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
         "snapshot_key": snapshot_key,
         "source": "backend-control",
         "tables": {
+            "cockpit": {"display_name": "后台驾驶舱", "primary_key": "记录键", "rows": rows["cockpit"]},
             "metrics": {"display_name": "后台指标", "primary_key": "记录键", "rows": rows["metrics"]},
             "metric_history": {"display_name": "指标历史", "primary_key": "记录键", "rows": rows["metric_history"]},
             "actions": {"display_name": "行动队列", "primary_key": "记录键", "rows": rows["actions"]},

@@ -44,6 +44,7 @@ Use this skill to turn engineering evidence into project progress candidates and
 
 The report must include `Codex 项目分析`:
 
+- 项目判断：判断置信度、本轮真正推进、当前阻塞、下个最小动作、噪声
 - 阶段判断
 - 有效进展
 - 证据噪声

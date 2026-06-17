@@ -8,6 +8,7 @@ import datetime as dt
 import importlib.util
 import re
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -150,6 +151,8 @@ class RepairResult:
     note: Note
     actions: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
+    debt_category: str = ""
+    debt_action: str = ""
     changed_text: str = ""
     final_quality: str = ""
     final_parse_status: str = ""
@@ -322,9 +325,29 @@ def assess_blockers(note: Note, text: str) -> list[str]:
     return sorted(set(blockers))
 
 
+def classify_debt(note: Note, text: str, blockers: list[str]) -> tuple[str, str]:
+    if not blockers:
+        return "已修复", "无需进入解析债务队列，可按质量门禁进入后续流程。"
+    combined = f"{note.text}\n{text}\n{' '.join(blockers)}"
+    source_kind = str(note.frontmatter.get("内容摘录来源") or "")
+    urlish = f"{note.frontmatter.get('原始链接') or ''} {note.frontmatter.get('分享链接') or ''}"
+    if "RSS/Atom" in source_kind or "RSS/Atom" in combined or "截断" in combined:
+        return "可自动补全文", "优先尝试网页正文抓取、RSS 原文链接解析或重新入箱补全文；成功后再重跑解析质量修复。"
+    if any(keyword in combined + urlish for keyword in ["抖音", "小红书", "YouTube", "youtube", "youtu.be", "视频", "转写", "字幕"]):
+        return "需重抓转写", "重新抓取公开视频、字幕、音频或平台文案；必要时提高转写上限后重跑。"
+    if any(keyword in combined for keyword in ["OCR", "图片", "图文", "截图"]):
+        return "需补 OCR", "重新执行图文 OCR 或改用质量更高的 OCR 后端；确认图片文字足够再推送。"
+    if note.parse_status in {"解析失败", "部分解析"} or "解析状态为" in combined:
+        return "需重新解析", "重新执行入箱解析，补齐正文、摘录来源和解析状态。"
+    if any("过短" in blocker or "不足" in blocker for blocker in blockers):
+        return "证据过短", "补充原文、摘要、人工备注或来源截图；否则只保留为待核验。"
+    return "需人工判断", "需要人工判断是否值得继续补抓、归档或跳过。"
+
+
 def repair_note(note: Note) -> RepairResult:
     updated, actions = normalize_text(note.text)
     blockers = assess_blockers(note, updated)
+    debt_category, debt_action = classify_debt(note, updated, blockers)
     final_quality = note.quality
     final_parse_status = note.parse_status or "已解析"
 
@@ -374,6 +397,8 @@ def repair_note(note: Note) -> RepairResult:
         note=note,
         actions=sorted(set(actions)),
         blockers=blockers,
+        debt_category=debt_category,
+        debt_action=debt_action,
         changed_text=updated,
         final_quality=final_quality,
         final_parse_status=final_parse_status,
@@ -382,6 +407,7 @@ def repair_note(note: Note) -> RepairResult:
 
 def render_repair_queue(results: list[RepairResult]) -> str:
     unresolved = [result for result in results if result.blockers]
+    category_counter = Counter(result.debt_category or "未分类" for result in unresolved)
     lines = [
         "# 解析质量修复队列",
         "",
@@ -391,6 +417,7 @@ def render_repair_queue(results: list[RepairResult]) -> str:
         "",
         f"- 更新时间：{now_datetime()}",
         f"- 待核验数量：{len(unresolved)}",
+        f"- 债务分型：{dict(category_counter)}",
         "",
         "## 队列",
         "",
@@ -405,11 +432,13 @@ def render_repair_queue(results: list[RepairResult]) -> str:
                 "",
                 f"- 来源文件：`{repo_relative(result.note.path)}`",
                 f"- 当前质量：{result.final_quality or result.note.quality or '未知'}",
+                f"- 解析债务：{result.debt_category or '未分类'}",
+                f"- 建议动作：{result.debt_action or '先补全解析证据；修复前不要进入前台精选、候选转正或飞书长期精选。'}",
                 "- 待处理：",
             ]
         )
         lines.extend(f"  - {blocker}" for blocker in result.blockers)
-        lines.extend(["", "- 建议：先补全解析证据；修复前不要进入前台精选、候选转正或飞书长期精选。", ""])
+        lines.extend(["", "- 门禁：修复前不要进入前台精选、候选转正或飞书长期精选。", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -429,9 +458,21 @@ def render_report(results: list[RepairResult], mode: str, flow_paths: list[Path]
         f"- 修复后可推送：{len(resolved)}",
         f"- 仍需核验：{len(unresolved)}",
         "",
-        "## 处理明细",
+        "## 解析债务分型",
         "",
     ]
+    debt_counter = Counter(result.debt_category or "未分类" for result in unresolved)
+    if debt_counter:
+        lines.extend(f"- {category}：{count} 条" for category, count in debt_counter.items())
+    else:
+        lines.append("- 暂无解析债务。")
+    lines.extend(
+        [
+            "",
+            "## 处理明细",
+            "",
+        ]
+    )
     if not results:
         lines.append("- 本轮没有命中需要解析质量修复的条目。")
     for result in results:
@@ -446,6 +487,8 @@ def render_report(results: list[RepairResult], mode: str, flow_paths: list[Path]
         if result.actions:
             lines.append(f"- 自动处理：{'；'.join(result.actions)}")
         if result.blockers:
+            lines.append(f"- 解析债务：{result.debt_category or '未分类'}")
+            lines.append(f"- 建议动作：{result.debt_action or '补全解析证据后重跑门禁。'}")
             lines.append("- 仍需核验：")
             lines.extend(f"  - {blocker}" for blocker in result.blockers)
         if not result.actions and not result.blockers:

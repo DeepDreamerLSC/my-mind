@@ -1,0 +1,4 @@
+interface:
+  display_name: "Run State Cleanup"
+  short_description: "治理 my-mind 运行产物与分批提交建议面板。"
+  default_prompt: "审计 my-mind 当前运行产物和未提交改动，生成分批治理建议。"

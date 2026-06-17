@@ -22,6 +22,7 @@ DEFAULT_CONFIG_FILE = ROOT / "85_运行记录" / "飞书仪表盘配置.local.js
 DEFAULT_RECORD_FILE = ROOT / "85_运行记录" / "飞书仪表盘同步记录.jsonl"
 DEFAULT_LARK_PREFIX = 'OPENCLAW_HOME="$HOME/.openclaw" lark-cli'
 DEFAULT_TABLE_MAP = {
+    "cockpit": "后台驾驶舱",
     "metrics": "后台指标",
     "metric_history": "指标历史",
     "actions": "行动队列",
@@ -265,23 +266,15 @@ def init_tables(
             continue
         table_id = table_map.get(table_key) or table.get("display_name") or table_key
         rows = list(table.get("rows") or [])
+        fields = field_plan(rows)
         create_cmd = lark_command(
             prefix,
             "+table-create",
             identity=identity,
             base_token=base_token,
-            args=["--name", str(table_id)],
+            args=["--name", str(table_id), "--fields", json.dumps(fields, ensure_ascii=False)],
         )
         results.append({"table": table_key, "operation": "table-create", "result": run_command(create_cmd, dry_run=dry_run)})
-        for field in field_plan(rows):
-            field_cmd = lark_command(
-                prefix,
-                "+field-create",
-                identity=identity,
-                base_token=base_token,
-                args=["--table-id", str(table_id), "--json", json.dumps(field, ensure_ascii=False)],
-            )
-            results.append({"table": table_key, "operation": "field-create", "field": field["name"], "result": run_command(field_cmd, dry_run=dry_run)})
     return results
 
 
