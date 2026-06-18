@@ -354,6 +354,60 @@ def inspect_run_records(run_dir: Path) -> dict[str, Any]:
         "latest_feishu_publish": latest_file("飞书精选页/索引/*.md", run_dir) or latest_file("飞书阅读页/飞书阅读页-*.md", run_dir),
         "latest_feishu_sync": latest_file("飞书知识库同步页/*.md", run_dir),
         "latest_run_state_cleanup": latest_file("运行产物治理-*.md", run_dir),
+        "latest_decision_review": latest_file("决策审视-*.md", run_dir),
+        "latest_code_quality_review": latest_file("代码质量审视-*.md", run_dir),
+    }
+
+
+def extract_section_bullets(text: str, heading: str, limit: int = 3) -> list[str]:
+    marker = f"## {heading}"
+    lines = text.splitlines()
+    start: int | None = None
+    for index, line in enumerate(lines):
+        if line.strip() == marker:
+            start = index + 1
+            break
+    if start is None:
+        return []
+    bullets: list[str] = []
+    for line in lines[start:]:
+        if line.startswith("## "):
+            break
+        stripped = line.strip()
+        if stripped.startswith("- "):
+            bullets.append(stripped[2:].strip())
+            if len(bullets) >= limit:
+                break
+    return bullets
+
+
+def inspect_review_reports(run_dir: Path, prefix: str, level_field: str, action_field: str = "建议动作") -> dict[str, Any]:
+    by_project: dict[str, dict[str, Any]] = {}
+    files = sorted(run_dir.glob(f"{prefix}-*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in files:
+        try:
+            text = read_text(path)
+        except OSError:
+            continue
+        meta = parse_frontmatter(text)
+        project = str(meta.get("项目") or path.stem)
+        if project in by_project:
+            continue
+        modified = dt.datetime.fromtimestamp(path.stat().st_mtime, TZ).strftime("%Y-%m-%d %H:%M:%S %z")
+        by_project[project] = {
+            "project": project,
+            "project_key": str(meta.get("项目键") or ""),
+            "level": str(meta.get(level_field) or "未知"),
+            "action": str(meta.get(action_field) or ""),
+            "path": repo_rel(path),
+            "modified": modified,
+            "risk_samples": extract_section_bullets(text, "偏航风险") or extract_section_bullets(text, "主要风险"),
+        }
+    levels = Counter(row["level"] for row in by_project.values())
+    return {
+        "total": len(by_project),
+        "levels": dict(levels),
+        "reports": list(by_project.values()),
     }
 
 
@@ -467,6 +521,10 @@ def record_age_hours(record: dict[str, Any] | None) -> float | None:
     return (dt.datetime.now(TZ) - modified).total_seconds() / 3600
 
 
+def sentence(value: Any) -> str:
+    return str(value or "").strip().rstrip("。.!！")
+
+
 def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     inbox = data["inbox"]
     flow = data["flow"]
@@ -476,6 +534,8 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     automations = data["automations"]
     run_records = data["run_records"]
     git = data["git"]
+    decision_reviews = data.get("decision_reviews", {"reports": []})
+    code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
 
     automation_errors = [automation for automation in automations if automation.get("error")]
     inactive_automations = [automation for automation in automations if str(automation.get("status") or "").upper() != "ACTIVE"]
@@ -522,6 +582,13 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         codex_items.append(f"待沉淀队列中 {flow['待补判断']} 条仍需补解析或补判断，先走核验门禁。")
     if flow.get("待核验", 0):
         codex_items.append(f"待核验队列有 {flow['待核验']} 条，避免直接进入前台精选。")
+    for item in decision_reviews.get("reports", []):
+        if item.get("level") in {"高", "中"}:
+            owner_prefix = "需要用户确认：" if item.get("level") == "高" else ""
+            codex_items.append(f"{owner_prefix}{item.get('project')} 决策审视为{item.get('level')}风险，下一步：{sentence(item.get('action') or '复核最小可逆动作')}。")
+    for item in code_quality_reviews.get("reports", []):
+        if item.get("level") in {"红色", "黄色"}:
+            codex_items.append(f"{item.get('project')} 代码质量审视为{item.get('level')}，先补验证或拆批：{sentence(item.get('action') or '复核质量门禁')}。")
     if git.get("dirty_count", 0):
         first_batch = ""
         if git.get("recommended_batches"):
@@ -550,6 +617,14 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         risks.append(f"工作区有 {git.get('dirty_count', 0)} 个未提交改动{detail}。")
     if inbox["low_quality_count"]:
         risks.append(f"{inbox['low_quality_count']} 条内容质量仍需核验，推送和转正前要继续门禁。")
+    high_decisions = [item for item in decision_reviews.get("reports", []) if item.get("level") == "高"]
+    red_quality = [item for item in code_quality_reviews.get("reports", []) if item.get("level") == "红色"]
+    if high_decisions:
+        names = "、".join(str(item.get("project")) for item in high_decisions[:3])
+        risks.append(f"决策审视发现高风险项目：{names}。")
+    if red_quality:
+        names = "、".join(str(item.get("project")) for item in red_quality[:3])
+        risks.append(f"代码质量审视发现红色风险项目：{names}。")
     if not risks:
         risks.append("未发现明显异常。")
 
@@ -597,6 +672,8 @@ def build_dashboard(data: dict[str, Any]) -> str:
     confirmations = data["confirmations"]
     push_state = data["push_state"]
     git = data["git"]
+    decision_reviews = data.get("decision_reviews", {"reports": []})
+    code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
 
     lines = [
         "# 当前后台状态",
@@ -638,6 +715,17 @@ def build_dashboard(data: dict[str, Any]) -> str:
     append_list(lines, digest["user_items"])
     lines.extend(["", "## Codex 后台应处理", ""])
     append_list(lines, digest["codex_items"])
+    lines.extend(["", "## 外部审视", ""])
+    if decision_reviews.get("reports"):
+        for item in decision_reviews["reports"]:
+            lines.append(f"- 决策审视｜{item.get('project')}：{item.get('level')}，{item.get('action') or '继续观察'}（`{item.get('path')}`）")
+    else:
+        lines.append("- 决策审视：暂无。")
+    if code_quality_reviews.get("reports"):
+        for item in code_quality_reviews["reports"]:
+            lines.append(f"- 代码质量｜{item.get('project')}：{item.get('level')}，{item.get('action') or '继续观察'}（`{item.get('path')}`）")
+    else:
+        lines.append("- 代码质量审视：暂无。")
     lines.extend(["", "## OpenClaw 前台应提醒", ""])
     append_list(lines, digest["openclaw_items"])
     lines.extend(["", "## 异常与风险", ""])
@@ -785,6 +873,8 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     confirmations = data["confirmations"]
     push_state = data["push_state"]
     git = data["git"]
+    decision_reviews = data.get("decision_reviews", {"reports": []})
+    code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
     rows: dict[str, list[dict[str, Any]]] = {
         "cockpit": [],
         "metrics": [],
@@ -796,6 +886,8 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
         "confirmations": [],
         "push_items": [],
         "flow": [],
+        "decision_reviews": [],
+        "code_quality_reviews": [],
     }
 
     def add_metric(name: str, value: Any, *, category: str, unit: str = "条", text: str = "", note: str = "") -> None:
@@ -837,6 +929,8 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     add_metric("已推送未反馈", push_state.get("waiting_feedback", 0), category="前台")
     add_metric("24小时冷却中", push_state.get("cooling", 0), category="前台")
     add_metric("工作区未提交改动", git.get("dirty_count", 0), category="工程")
+    add_metric("决策审视报告", decision_reviews.get("total", 0), category="审视", unit="份")
+    add_metric("代码质量审视报告", code_quality_reviews.get("total", 0), category="审视", unit="份")
 
     def add_cockpit(
         module: str,
@@ -915,6 +1009,26 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
         owner="Codex",
         next_action="按运行产物治理报告分批提交，代码与运行状态分开。",
         source="git status",
+    )
+    high_decision_count = sum(1 for item in decision_reviews.get("reports", []) if item.get("level") == "高")
+    risky_quality_count = sum(1 for item in code_quality_reviews.get("reports", []) if item.get("level") in {"红色", "黄色"})
+    add_cockpit(
+        "决策审视",
+        high_decision_count,
+        state="需复核" if high_decision_count else "正常",
+        conclusion=f"{high_decision_count} 个项目存在高风险决策审视。",
+        owner="Codex/用户",
+        next_action="Codex 给出反方视角和最小可逆动作；高风险问题交给 OpenClaw 短消息确认。",
+        source="decision-review",
+    )
+    add_cockpit(
+        "代码质量",
+        risky_quality_count,
+        state="需门禁" if risky_quality_count else "正常",
+        conclusion=f"{risky_quality_count} 个项目存在黄色或红色代码质量风险。",
+        owner="Codex",
+        next_action="先补验证、拆批或进入正式 code review，再继续新增功能。",
+        source="code-quality-review",
     )
 
     for owner, values in [
@@ -1044,6 +1158,40 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
             }
         )
 
+    for item in decision_reviews.get("reports", []):
+        raw_key = item.get("path") or item.get("project")
+        rows["decision_reviews"].append(
+            {
+                "记录键": short_record_key("decision", raw_key),
+                "原始键": raw_key,
+                "生成时间": generated_at,
+                "项目": item.get("project") or "",
+                "项目键": item.get("project_key") or "",
+                "风险等级": item.get("level") or "",
+                "建议动作": item.get("action") or "",
+                "风险样例": "\n".join(item.get("risk_samples") or []),
+                "报告路径": item.get("path") or "",
+                "修改时间": item.get("modified") or "",
+            }
+        )
+
+    for item in code_quality_reviews.get("reports", []):
+        raw_key = item.get("path") or item.get("project")
+        rows["code_quality_reviews"].append(
+            {
+                "记录键": short_record_key("codequality", raw_key),
+                "原始键": raw_key,
+                "生成时间": generated_at,
+                "项目": item.get("project") or "",
+                "项目键": item.get("project_key") or "",
+                "质量等级": item.get("level") or "",
+                "建议动作": item.get("action") or "",
+                "风险样例": "\n".join(item.get("risk_samples") or []),
+                "报告路径": item.get("path") or "",
+                "修改时间": item.get("modified") or "",
+            }
+        )
+
     return {
         "generated_at": generated_at,
         "snapshot_key": snapshot_key,
@@ -1059,6 +1207,8 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
             "confirmations": {"display_name": "待确认候选", "primary_key": "记录键", "rows": rows["confirmations"]},
             "push_items": {"display_name": "前台推送", "primary_key": "记录键", "rows": rows["push_items"]},
             "flow": {"display_name": "流转队列", "primary_key": "记录键", "rows": rows["flow"]},
+            "decision_reviews": {"display_name": "决策审视", "primary_key": "记录键", "rows": rows["decision_reviews"]},
+            "code_quality_reviews": {"display_name": "代码质量审视", "primary_key": "记录键", "rows": rows["code_quality_reviews"]},
         },
     }
 
@@ -1101,6 +1251,8 @@ def build_report(data: dict[str, Any]) -> str:
     feedback = data["feedback"]
     confirmations = data["confirmations"]
     push_state = data["push_state"]
+    decision_reviews = data.get("decision_reviews", {"reports": []})
+    code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
     actions: list[str] = []
     if feedback["pending_count"]:
         actions.append("优先消费前台反馈队列，把用户短反馈回写到来源笔记。")
@@ -1173,6 +1325,22 @@ def build_report(data: dict[str, Any]) -> str:
         lines.append(f"- 24 小时冷却中：{push_state.get('cooling', 0)}")
     else:
         lines.append("- 尚未生成前台推送状态文件。")
+    lines.extend(["", "## 外部审视", ""])
+    if decision_reviews.get("reports"):
+        lines.append("### 决策审视")
+        lines.append("")
+        for item in decision_reviews["reports"]:
+            lines.append(f"- {item.get('project')}：{item.get('level')}，{item.get('action') or '继续观察'}，`{item.get('path')}`")
+    else:
+        lines.append("- 决策审视：暂无。")
+    if code_quality_reviews.get("reports"):
+        lines.append("")
+        lines.append("### 代码质量审视")
+        lines.append("")
+        for item in code_quality_reviews["reports"]:
+            lines.append(f"- {item.get('project')}：{item.get('level')}，{item.get('action') or '继续观察'}，`{item.get('path')}`")
+    else:
+        lines.append("- 代码质量审视：暂无。")
     lines.extend(["", "## 最近运行记录", ""])
     for key, value in data["run_records"].items():
         label = key.replace("latest_", "")
@@ -1228,6 +1396,8 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
         "confirmations": inspect_confirmations(confirmation_queue),
         "push_state": inspect_push_state(push_state),
         "run_records": inspect_run_records(run_dir),
+        "decision_reviews": inspect_review_reports(run_dir, "决策审视", "最高风险"),
+        "code_quality_reviews": inspect_review_reports(run_dir, "代码质量审视", "质量等级"),
         "git": inspect_git(),
     }
     data["digest"] = build_digest(data)

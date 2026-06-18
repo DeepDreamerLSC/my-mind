@@ -33,6 +33,8 @@ DEFAULT_TABLE_MAP = {
     "push_items": "前台推送",
     "flow": "流转队列",
     "advice": "当前行动建议",
+    "decision_reviews": "决策审视",
+    "code_quality_reviews": "代码质量审视",
 }
 NUMBER_FIELDS = {"数值", "距现在小时", "数量", "分数", "提醒次数"}
 

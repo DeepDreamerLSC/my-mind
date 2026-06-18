@@ -1,0 +1,6 @@
+interface:
+  display_name: "决策审视"
+  short_description: "审视项目假设、偏航风险和最小可逆下一步。"
+  default_prompt: "Use $decision-review to review project decisions and identify risky assumptions before the next step."
+policy:
+  allow_implicit_invocation: true

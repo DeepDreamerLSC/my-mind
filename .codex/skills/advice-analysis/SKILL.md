@@ -1,6 +1,6 @@
 ---
 name: advice-analysis
-description: Generate prioritized my-mind action advice from backend dashboard data, project progress reports, flow queues, pending confirmations, and run records. Use when the user asks 建议分析, 行动建议, 接下来做什么, 优先级分析, recommendation analysis, or wants Codex/OpenClaw to convert collected evidence into next safe actions.
+description: Generate prioritized my-mind action advice from backend dashboard data, project progress reports, decision reviews, code-quality reviews, flow queues, pending confirmations, and run records. Use when the user asks 建议分析, 行动建议, 接下来做什么, 优先级分析, recommendation analysis, or wants Codex/OpenClaw to convert collected evidence into next safe actions.
 ---
 
 # 建议分析
@@ -57,6 +57,8 @@ python3 .codex/skills/advice-analysis/scripts/analyze_advice.py --format json
 - `85_运行记录/后台总览/当前后台状态.md`
 - `85_运行记录/后台总览/OpenClaw待提醒.md`
 - `85_运行记录/项目进展巡检-*.md`
+- `85_运行记录/决策审视-*.md`
+- `85_运行记录/代码质量审视-*.md`
 - `10_项目/<项目>/任务清单.md`
 - `10_项目/<项目>/风险清单.md`
 - `10_项目/<项目>/问题清单.md`
@@ -90,6 +92,8 @@ The dashboard export is injected into:
 - OpenClaw advice should focus on presenting Feishu links, pending confirmations, and short feedback prompts.
 - Treat `待沉淀` total as inventory only. Generate automatic distillation advice only from `待沉淀待消费`; route `已有候选待确认` to OpenClaw/user confirmation and `待补判断` to parse or judgement repair.
 - Project advice must use project reports as evidence, not raw commit lists alone.
+- Decision-review advice must surface high-risk assumptions, deviation risk, and smallest reversible actions.
+- Code-quality advice must surface red/yellow quality gates before recommending more feature work.
 - If a project has many dirty files, suggest整理和分批提交 before writing project conclusions.
 - If parse quality, OCR, transcription, or environment files are involved, treat quality and safety as higher priority than speed.
 

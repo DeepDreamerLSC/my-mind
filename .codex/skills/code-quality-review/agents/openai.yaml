@@ -1,0 +1,6 @@
+interface:
+  display_name: "代码质量审视"
+  short_description: "审视 Codex 产出代码质量、测试缺口和提交风险。"
+  default_prompt: "Use $code-quality-review to review Codex-generated code quality and produce a risk-focused report."
+policy:
+  allow_implicit_invocation: true

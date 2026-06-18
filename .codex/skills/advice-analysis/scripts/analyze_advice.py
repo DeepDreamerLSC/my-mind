@@ -67,6 +67,8 @@ class AdviceContext:
     dashboard_loaded: bool
     dashboard_generated_at: str = ""
     project_reports: dict[str, Path] = field(default_factory=dict)
+    decision_reports: dict[str, Path] = field(default_factory=dict)
+    code_quality_reports: dict[str, Path] = field(default_factory=dict)
     sources: list[EvidenceSource] = field(default_factory=list)
 
 
@@ -218,6 +220,23 @@ def latest_project_reports(project_filter: str) -> dict[str, Path]:
     return reports
 
 
+def latest_review_reports(prefix: str, project_filter: str) -> dict[str, Path]:
+    reports: dict[str, Path] = {}
+    files = sorted(RUN_DIR.glob(f"{prefix}-*.md"), key=lambda path: path.stat().st_mtime, reverse=True)
+    for path in files:
+        text = read_text(path)
+        meta = parse_frontmatter(text)
+        project = str(meta.get("项目") or "")
+        project_key = str(meta.get("项目键") or normalize_project_key(project))
+        if not project:
+            continue
+        if project_filter != "all" and project_filter not in {project, project_key, normalize_project_key(project)}:
+            continue
+        if project not in reports:
+            reports[project] = path
+    return reports
+
+
 def infer_project_from_filename(name: str) -> str:
     match = re.match(r"项目进展巡检-([a-zA-Z0-9_-]+)-\d{4}-", name)
     if not match:
@@ -240,6 +259,10 @@ def score_from_priority(value: str, default: int = 55) -> int:
 
 
 def classify_domain(text: str) -> str:
+    if any(word in text for word in ["决策审视", "隐含假设", "偏航", "机会成本", "最小可逆"]):
+        return "决策审视"
+    if any(word in text for word in ["代码质量", "测试", "lint", "typecheck", "code review", "AI 代码"]):
+        return "代码质量"
     if any(word in text for word in ["解析", "转写", "OCR", "内容质量", "待核验", "门禁"]):
         return "质量门禁"
     if any(word in text for word in ["待确认", "转正", "候选"]):
@@ -264,6 +287,10 @@ def next_step_for(owner: str, action: str) -> str:
         return "由 Codex 运行解析质量修复或逐条补抓，再重新进入分拣/推送门禁。"
     if "工作区" in action or "提交" in action:
         return "由 Codex 先做只读整理，区分功能变更、配置风险、运行产物和文档，再分批提交。"
+    if "决策审视" in action or "偏航" in action:
+        return "由 Codex 给出反方观点、证据和最小可逆动作；需要用户取舍时交给 OpenClaw 短消息确认。"
+    if "代码质量" in action or "质量门禁" in action:
+        return "由 Codex 先补验证、拆分提交边界或进入正式 code review；不要继续堆功能。"
     if "待沉淀" in action:
         if "已有候选" in action:
             return "由 OpenClaw 展示待确认候选，Codex 不重复生成候选草稿。"
@@ -459,6 +486,62 @@ def add_project_report_suggestions(reports: dict[str, Path], suggestions: list[S
             )
 
 
+def score_decision_level(level: str) -> int:
+    return {"高": 88, "中": 72, "低": 48}.get(level, 58)
+
+
+def score_quality_level(level: str) -> int:
+    return {"红色": 92, "黄色": 78, "绿色": 42}.get(level, 58)
+
+
+def add_decision_review_suggestions(reports: dict[str, Path], suggestions: list[Suggestion]) -> None:
+    for project, path in reports.items():
+        text = read_text(path)
+        meta = parse_frontmatter(text)
+        level = str(meta.get("最高风险") or "未知")
+        if level == "低":
+            continue
+        action = str(meta.get("建议动作") or "复核当前方向和下一步。")
+        risks = extract_bullets(extract_heading_section(text, "偏航风险"))
+        risk_text = "；".join(risks[:2]) if risks else f"{project} 决策审视风险等级为 {level}。"
+        suggestions.append(
+            Suggestion(
+                score=score_decision_level(level),
+                owner="Codex/用户" if level == "高" else "Codex",
+                domain="决策审视",
+                action=f"复核 {project} 决策审视：{action}",
+                reason=risk_text,
+                next_step=next_step_for("Codex", "决策审视"),
+                evidence=[repo_rel(path)],
+                source="decision-review",
+            )
+        )
+
+
+def add_code_quality_suggestions(reports: dict[str, Path], suggestions: list[Suggestion]) -> None:
+    for project, path in reports.items():
+        text = read_text(path)
+        meta = parse_frontmatter(text)
+        level = str(meta.get("质量等级") or "未知")
+        if level == "绿色":
+            continue
+        action = str(meta.get("建议动作") or "补充验证并复核提交边界。")
+        risks = extract_bullets(extract_heading_section(text, "主要风险"))
+        risk_text = "；".join(risks[:2]) if risks else f"{project} 代码质量等级为 {level}。"
+        suggestions.append(
+            Suggestion(
+                score=score_quality_level(level),
+                owner="Codex",
+                domain="代码质量",
+                action=f"先处理 {project} 代码质量审视：{action}",
+                reason=risk_text,
+                next_step=next_step_for("Codex", "代码质量"),
+                evidence=[repo_rel(path)],
+                source="code-quality-review",
+            )
+        )
+
+
 def add_project_file_suggestions(project_filter: str, suggestions: list[Suggestion]) -> None:
     if not PROJECT_DIR.exists():
         return
@@ -578,21 +661,31 @@ def dedupe_and_sort(suggestions: list[Suggestion], limit: int) -> list[Suggestio
 def build_advice(project_filter: str, limit: int) -> tuple[AdviceContext, list[Suggestion]]:
     dashboard = load_dashboard()
     reports = latest_project_reports(project_filter)
+    decision_reports = latest_review_reports("决策审视", project_filter)
+    code_quality_reports = latest_review_reports("代码质量审视", project_filter)
     context = AdviceContext(
         generated_at=now().strftime("%Y-%m-%d %H:%M:%S %z"),
         project_filter=project_filter,
         dashboard_loaded=bool(dashboard),
         dashboard_generated_at=str(dashboard.get("generated_at") or ""),
         project_reports=reports,
+        decision_reports=decision_reports,
+        code_quality_reports=code_quality_reports,
     )
     if dashboard:
         context.sources.append(EvidenceSource(kind="dashboard", path=repo_rel(DASHBOARD_DATA), title="飞书仪表盘数据"))
     for project, path in reports.items():
         context.sources.append(EvidenceSource(kind="project_report", path=repo_rel(path), title=project))
+    for project, path in decision_reports.items():
+        context.sources.append(EvidenceSource(kind="decision_review", path=repo_rel(path), title=project))
+    for project, path in code_quality_reports.items():
+        context.sources.append(EvidenceSource(kind="code_quality_review", path=repo_rel(path), title=project))
     suggestions: list[Suggestion] = []
     if dashboard:
         add_dashboard_suggestions(dashboard, suggestions)
     add_project_report_suggestions(reports, suggestions)
+    add_decision_review_suggestions(decision_reports, suggestions)
+    add_code_quality_suggestions(code_quality_reports, suggestions)
     add_project_file_suggestions(project_filter, suggestions)
     suggestions = dedupe_and_sort(suggestions, limit)
     return context, suggestions
@@ -687,6 +780,8 @@ def render_json(context: AdviceContext, suggestions: list[Suggestion]) -> str:
         "context": {
             **asdict(context),
             "project_reports": {key: repo_rel(value) for key, value in context.project_reports.items()},
+            "decision_reports": {key: repo_rel(value) for key, value in context.decision_reports.items()},
+            "code_quality_reports": {key: repo_rel(value) for key, value in context.code_quality_reports.items()},
         },
         "suggestions": [{**asdict(item), "priority": item.priority} for item in suggestions],
     }
