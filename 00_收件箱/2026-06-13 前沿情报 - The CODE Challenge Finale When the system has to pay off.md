@@ -121,6 +121,16 @@ CHAPTERS:
 
 
 
+
+
+
+
+
+- 2026-06-23 07:13:42 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-22 07:14:45 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-21 07:15:21 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-20 07:14:35 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-19 07:18:09 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 - 2026-06-18 07:14:29 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 - 2026-06-17 22:17:56 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 - 2026-06-17 07:14:46 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
