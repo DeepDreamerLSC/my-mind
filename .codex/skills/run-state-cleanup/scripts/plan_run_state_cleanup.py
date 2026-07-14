@@ -54,7 +54,11 @@ CATEGORY_ACTIONS = {
 SENSITIVE_PATTERNS = (
     re.compile(r"\.env($|[./])"),
     re.compile(r"\.local\.json$"),
-    re.compile(r"(token|secret|password|credential|cookie)", re.I),
+    re.compile(r"(^|[._/-])(token|secret|password|credential|cookie)([._/-]|$)", re.I),
+)
+EXTERNAL_ID_PATTERN = re.compile(
+    r"[\"']?(space_id|node_token|obj_token|page_token|wiki_space_id|wiki_node_token|wiki_parent_node_token)[\"']?\s*[:=]",
+    re.I,
 )
 
 
@@ -151,7 +155,24 @@ def short_key(value: str) -> str:
     return hashlib.sha1(value.encode("utf-8")).hexdigest()[:10]
 
 
-def build_plan(entries: list[WorktreeEntry], sample_limit: int) -> dict[str, Any]:
+def external_identifier_candidates(directory: Path) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    if not directory.exists():
+        return candidates
+    for path in sorted(directory.glob("*.jsonl")):
+        if ".local." in path.name or path.stat().st_size > 2_000_000:
+            continue
+        fields = sorted({match.group(1).lower() for match in EXTERNAL_ID_PATTERN.finditer(path.read_text(encoding="utf-8", errors="ignore"))})
+        if fields:
+            candidates.append({"path": repo_relative(path), "fields": fields})
+    return candidates
+
+
+def build_plan(
+    entries: list[WorktreeEntry],
+    sample_limit: int,
+    external_ids: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     counter = Counter(entry.category for entry in entries)
     samples: dict[str, list[dict[str, str]]] = {}
     for entry in entries:
@@ -184,14 +205,18 @@ def build_plan(entries: list[WorktreeEntry], sample_limit: int) -> dict[str, Any
     ]
     if any(group["category"] == "local_config" for group in groups):
         batches.append("本地配置：默认不纳入提交，只保留风险提醒。")
+    external_ids = external_ids or []
+    if external_ids:
+        batches.append("外部对象标识：先迁移到 `*.local.jsonl` 或环境变量，再对可提交记录保留脱敏引用；本脚本不改写历史证据。")
     return {
         "generated_at": now_datetime(),
         "dirty_count": len(entries),
         "category_counts": dict(counter),
         "groups": groups,
         "sensitive_candidates": sensitive[:20],
+        "external_identifier_candidates": external_ids[:20],
         "recommended_batches": batches,
-        "status": "clean" if not entries else ("needs_attention" if sensitive else "dirty"),
+        "status": "clean" if not entries and not external_ids else ("needs_attention" if sensitive or external_ids else "dirty"),
     }
 
 
@@ -242,6 +267,21 @@ def render_report(plan: dict[str, Any], *, mode: str) -> str:
     else:
         lines.append("- 未在路径层面发现明显本地配置或密钥风险；提交前仍需检查内容。")
 
+    lines.extend(["", "## 外部对象标识迁移计划", ""])
+    external_ids = list(plan.get("external_identifier_candidates") or [])
+    if external_ids:
+        lines.append("- 以下可提交运行记录包含飞书等外部对象标识字段；报告只列字段名，不回显值：")
+        for item in external_ids:
+            lines.append(f"  - `{item['path']}`：{', '.join(item['fields'])}")
+        lines.extend(
+            [
+                "- 迁移顺序：先复制真实标识到已忽略的 `*.local.jsonl` 或环境变量，再让读取端兼容新位置，最后单独评审历史记录脱敏。",
+                "- 本轮不移动、不删除、不覆盖上述 JSONL，避免破坏发布更新和历史审计链。",
+            ]
+        )
+    else:
+        lines.append("- 未在根级运行 JSONL 中发现外部对象标识字段。")
+
     lines.extend(
         [
             "",
@@ -266,7 +306,11 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     entries = parse_git_status(run_git_status())
-    plan = build_plan(entries, sample_limit=max(1, args.sample_limit))
+    plan = build_plan(
+        entries,
+        sample_limit=max(1, args.sample_limit),
+        external_ids=external_identifier_candidates(RUN_DIR),
+    )
     if args.json:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return 0

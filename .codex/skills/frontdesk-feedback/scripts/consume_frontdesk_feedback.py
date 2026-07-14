@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import datetime as dt
 import difflib
 import json
@@ -16,12 +17,18 @@ from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[4]
+LIB_DIR = ROOT / ".codex/lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+import frontdesk_delivery as delivery
+
+
 TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 DEFAULT_QUEUE = DEFAULT_RUN_DIR / "前台反馈队列.jsonl"
 DEFAULT_PUSH_STATE = DEFAULT_RUN_DIR / "前台推送状态.json"
 DEFAULT_CONFIRM_QUEUE = DEFAULT_RUN_DIR / "待确认事项.jsonl"
-CONFIRM_QUEUE_MD = ROOT / "05_流转区/50_待确认/待确认队列.md"
 DISTILL_SCRIPT = ROOT / ".codex" / "skills" / "inbox-distill" / "scripts" / "distill_inbox_note.py"
 FEISHU_SYNC_SCRIPT = ROOT / ".codex" / "skills" / "feishu-sync" / "scripts" / "sync_selected_notes.py"
 TERMINAL_STATUSES = {"已处理", "已晋升", "可丢弃", "已归档"}
@@ -575,7 +582,7 @@ def mark_candidate_needs_verification(candidate_path: Path, problems: list[str],
     if not candidate_path.exists():
         return
     text = candidate_path.read_text(encoding="utf-8", errors="ignore")
-    text = set_frontmatter_scalar(text, "吸收状态", "待确认")
+    text = set_frontmatter_scalar(text, "吸收状态", "待核验")
     text = set_frontmatter_scalar(text, "可信状态", "待核验")
     entry = f"- {now_datetime()}：转正门禁未通过或用户要求继续核验。问题：{'；'.join(problems)}。原始回复：{record.get('原始回复') or ''}"
     text = append_to_section(text, "转正门禁记录", entry)
@@ -615,61 +622,6 @@ def update_confirmation_status(
         break
     if changed:
         write_jsonl(DEFAULT_CONFIRM_QUEUE, records)
-        refresh_confirm_queue_markdown(records)
-
-
-def refresh_confirm_queue_markdown(records: list[dict[str, Any]]) -> None:
-    pending = [record for record in records if str(record.get("处理状态") or "") == "待确认"]
-    lines = [
-        "# 待确认队列",
-        "",
-        "这里承接 `pending-distill` 自动消费后仍需要用户判断的事项。",
-        "",
-        "## 使用边界",
-        "",
-        "- 这是确认视图，不是长期知识正文。",
-        "- OpenClaw 可以读取本页生成“今日待确认”前台消息。",
-        "- 用户确认后仍由 Codex 后台执行转正门禁、回写状态和飞书同步。",
-        "",
-        "## 总览",
-        "",
-        f"- 更新时间：{now_datetime()}",
-        f"- 待确认数量：{len(pending)}",
-        "",
-        "## 队列",
-        "",
-    ]
-    if not pending:
-        lines.append("当前没有待确认事项。")
-    for index, item in enumerate(pending, start=1):
-        candidate = str(item.get("候选文件") or "")
-        existing = item.get("已有候选")
-        if not candidate and isinstance(existing, list) and existing:
-            candidate = "、".join(f"`{value}`" for value in existing)
-        elif candidate:
-            candidate = f"`{candidate}`"
-        else:
-            candidate = "暂无"
-        questions = item.get("确认问题") if isinstance(item.get("确认问题"), list) else []
-        options = item.get("可回复") if isinstance(item.get("可回复"), list) else []
-        lines.extend(
-            [
-                f"### {index}. {item.get('标题') or '未命名'}",
-                "",
-                f"- 状态：{item.get('状态') or '待确认'}",
-                f"- 优先级：{item.get('优先级') or '未知'}",
-                f"- 类型：{item.get('类型') or item.get('类型代码') or '待判断'}",
-                f"- 来源文件：`{item.get('来源文件') or ''}`",
-                f"- 候选文件：{candidate}",
-                f"- 原因：{item.get('原因') or ''}",
-                f"- 可回复：{' / '.join(str(option) for option in options) if options else '确认转正 / 继续核验 / 调整分类 / 跳过'}",
-                "- 需要确认：",
-            ]
-        )
-        lines.extend(f"  - {question}" for question in questions or [f"请确认《{item.get('标题') or '本条'}》下一步。"])
-        lines.append("")
-    CONFIRM_QUEUE_MD.parent.mkdir(parents=True, exist_ok=True)
-    CONFIRM_QUEUE_MD.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
 
 def maybe_sync_feishu(candidate_path: Path, *, write: bool, sync_feishu: bool) -> str:
@@ -709,18 +661,18 @@ def process_confirmation_record(
         ok, problems = promotion_gate(candidate_path, source_path)
         if not ok:
             mark_candidate_needs_verification(candidate_path, problems, record, write=write)
-            record["处理状态"] = "待确认"
+            record["处理状态"] = "需继续核验"
             record["处理结果"] = "转正门禁未通过：" + "；".join(problems)
             record["处理时间"] = now_datetime()
             if write:
                 update_confirmation_status(
                     feedback_record=record,
                     confirm=confirm,
-                    status="待确认",
+                    status="需继续核验",
                     result=record["处理结果"],
                     candidate_path=candidate_path,
                 )
-            return record, "待确认：转正门禁未通过"
+            return record, "待核验：转正门禁未通过"
         if write:
             promote_candidate(candidate_path, source_path, record)
         sync_result = maybe_sync_feishu(candidate_path, write=write, sync_feishu=sync_feishu)
@@ -916,10 +868,7 @@ def process_record(record: dict[str, Any], *, write: bool, distill: bool, force_
 def update_push_state(path: Path, records: list[dict[str, Any]], *, write: bool) -> None:
     if not path.exists():
         return
-    try:
-        state = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return
+    state = delivery.load_state(path)
     items = state.get("items") if isinstance(state, dict) else None
     if not isinstance(items, dict):
         return
@@ -931,20 +880,39 @@ def update_push_state(path: Path, records: list[dict[str, Any]], *, write: bool)
         item = items[source]
         if not isinstance(item, dict):
             continue
+        feedback_at = str(record.get("时间") or now_datetime())
+        action = str(record.get("动作") or "已反馈")
+        content = str(record.get("内容") or record.get("原始回复") or "")
+        changed = delivery.mark_feedback_received(
+            state,
+            source,
+            at=feedback_at,
+            action=action,
+            content=content,
+        ) or changed
         if str(record.get("处理状态") or "") == "已晋升":
             feedback_status = "已晋升"
         elif str(record.get("处理状态") or "") == "已归档" or low_value_feedback(record):
             feedback_status = "已读-不沉淀"
         else:
-            feedback_status = str(record.get("动作") or "已反馈")
+            feedback_status = action
         item["feedback_status"] = feedback_status
-        item["last_feedback_at"] = str(record.get("时间") or now_datetime())
-        item["last_feedback_content"] = str(record.get("内容") or record.get("原始回复") or "")
+        item["last_feedback_at"] = feedback_at
+        item["last_feedback_content"] = content
         changed = True
+        if (
+            str(record.get("处理状态") or "") in {"已处理", "已晋升", "已归档"}
+            and str(item.get("delivery_stage") or "") == "feedback_received"
+        ):
+            changed = delivery.mark_applied(
+                state,
+                source,
+                at=str(record.get("处理时间") or now_datetime()),
+                result=str(record.get("处理结果") or feedback_status),
+            ) or changed
     if changed:
-        state["updated_at"] = dt.datetime.now(TZ).isoformat(timespec="seconds")
         if write:
-            path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            delivery.save_state(path, state)
 
 
 def build_report(results: list[str], processed: list[dict[str, Any]], dry_run: bool) -> str:
@@ -974,6 +942,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR), help="Run record directory.")
     parser.add_argument("--push-state", default=str(DEFAULT_PUSH_STATE), help="Frontdesk push state JSON.")
     parser.add_argument("--write", action="store_true", help="Write source updates and queue status. Default is dry-run.")
+    parser.add_argument("--write-report", action="store_true", help="Also write a timestamped diagnostic report; excluded from the event write set by default.")
     parser.add_argument("--no-distill", action="store_true", help="Do not call inbox-distill for 沉淀成提示词 feedback.")
     parser.add_argument("--force-distill", action="store_true", help="Pass --force to inbox-distill when writing prompt candidates.")
     parser.add_argument("--sync-feishu", action="store_true", help="After confirmed promotion, immediately run feishu-sync for the promoted candidate.")
@@ -993,6 +962,23 @@ def main() -> int:
         push_state = ROOT / push_state
 
     records = read_jsonl(queue)
+    if args.write and push_state.exists():
+        preflight_state = copy.deepcopy(delivery.load_state(push_state))
+        for record in records:
+            for candidate in expand_batch_record(record):
+                if str(candidate.get("处理状态") or "") != "待处理":
+                    continue
+                source = str(candidate.get("来源文件") or "").strip()
+                if not source:
+                    source, _reason = infer_source_file(candidate)
+                if source:
+                    delivery.mark_feedback_received(
+                        preflight_state,
+                        source,
+                        at=str(candidate.get("时间") or now_datetime()),
+                        action=str(candidate.get("动作") or "已反馈"),
+                        content=str(candidate.get("内容") or candidate.get("原始回复") or ""),
+                    )
     updated_records: list[dict[str, Any]] = []
     processed_records: list[dict[str, Any]] = []
     results: list[str] = []
@@ -1051,10 +1037,13 @@ def main() -> int:
     if args.write:
         write_jsonl(queue, updated_records)
         update_push_state(push_state, processed_records, write=True)
-        run_dir.mkdir(parents=True, exist_ok=True)
-        report_path = run_dir / f"反馈消费-{now_filename()}.md"
-        report_path.write_text(report, encoding="utf-8")
-        print(repo_rel(report_path))
+        if args.write_report:
+            run_dir.mkdir(parents=True, exist_ok=True)
+            report_path = run_dir / f"反馈消费-{now_filename()}.md"
+            report_path.write_text(report, encoding="utf-8")
+            print(repo_rel(report_path))
+        else:
+            print(repo_rel(queue))
     else:
         print(report, end="")
     return 0

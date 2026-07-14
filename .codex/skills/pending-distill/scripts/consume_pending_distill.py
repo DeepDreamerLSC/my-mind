@@ -199,6 +199,18 @@ def kind_label(kind: str) -> str:
     }.get(kind, kind or "待判断")
 
 
+def candidate_needs_verification(paths: list[str]) -> bool:
+    for value in paths:
+        path = resolve_repo_path(value)
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        absorption = re.search(r"(?m)^吸收状态:\s*(.+?)\s*$", text)
+        if absorption and absorption.group(1).strip().strip('"') == "待核验":
+            return True
+    return False
+
+
 def build_confirm_item_from_candidate(item: PendingItem, candidate: Any) -> ConfirmItem:
     if candidate.status == "已生成候选":
         status = "已生成候选"
@@ -212,6 +224,12 @@ def build_confirm_item_from_candidate(item: PendingItem, candidate: Any) -> Conf
         target = None
         existing = item.candidate_paths
         candidate_kind = kind_from_existing_candidates(existing) or candidate.kind
+    candidate_paths = [*existing]
+    if target:
+        candidate_paths.append(repo_relative(target))
+    if candidate_needs_verification(candidate_paths):
+        status = "需继续核验"
+        reason = "候选此前未通过转正门禁，需 Codex 补全或核验。"
     questions = dedupe(
         [
             *getattr(candidate, "questions", []),
@@ -314,7 +332,7 @@ def confirm_json_records(items: list[ConfirmItem]) -> str:
                 "原因": item.reason,
                 "确认问题": item.questions,
                 "可回复": item.options,
-                "处理状态": "待确认",
+                "处理状态": "需继续核验" if item.status in {"需继续解析或核验", "需继续核验"} else "待确认",
             }
         )
     return "\n".join(json.dumps(record, ensure_ascii=False, sort_keys=True) for record in records) + ("\n" if records else "")

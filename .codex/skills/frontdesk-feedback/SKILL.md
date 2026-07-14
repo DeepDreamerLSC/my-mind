@@ -104,13 +104,16 @@ python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py -
 - 原始回复
 - 处理状态
 
+有真实 `sent` 回执的条目在反馈成功追加后进入 `feedback_received`，消费成功后才进入 `applied`。`prepared` 或 `published` 条目缺少发送回执时拒绝跳级；旧版条目只记录 `legacy_feedback_received_at`，继续保持 `legacy_delivery: unknown`。
+
 消费默认写入：
 
 ```text
 来源笔记的 ## 阅读思考
 来源笔记的 ## 前台反馈处理记录
-85_运行记录/反馈消费-YYYY-MM-DD-HHMM.md
 ```
+
+默认事件不写时间戳报告，也不刷新派生的待确认 Markdown，以守住最多 5 个文件的 Canonical Write Set。需要诊断证据时显式加 `--write-report`；待确认 Markdown 由后续固定视图刷新重建。
 
 如果用户回复 `沉淀成提示词`，消费脚本会调用 `inbox-distill` 生成候选提示词并回链；如果用户明确说“入库”或泛化地要求沉淀为资料/洞察，优先交给 `knowledge-intake` 生成候选资料、候选提示词或候选洞察。所有候选都不直接标记为已晋升。
 
@@ -121,11 +124,13 @@ python3 .codex/skills/frontdesk-feedback/scripts/consume_frontdesk_feedback.py -
 - 候选文件写入 `飞书同步: 精选同步 / 待同步`。
 - 如传入 `--sync-feishu`，调用 `feishu-sync` 发布或更新飞书知识库页面。
 
-如果门禁不通过，候选保持待确认/待核验，并把最小问题写回 `转正门禁记录`。
+如果门禁不通过，候选转为 `待核验`，确认事项转为 `需继续核验`，并把最小问题写回 `转正门禁记录`。它不再作为用户待确认项反复提醒，直到 Codex 后台补全或核验后显式重新入队。
 
 ## 工作边界
 
 - OpenClaw 只调用入队脚本，不直接改来源笔记。
+- 默认上下文优先读取 `85_运行记录/后台总览/今日动作.md`；兼容旧推送或指定队列时使用 `--push-file`。
+- 入队事件的 Canonical Write Set 只有反馈队列和推送状态；消费事件最多再包含来源、候选和待确认视图，总计不超过 5 个文件。
 - Codex 后台调用消费脚本。
 - `已读` 和 `补充想法` 只回写阅读思考。
 - `已读` 会同步标记来源 `阅读状态: 已读`；若用户明确说“没什么价值 / 无需沉淀”，来源会归档并从前台待反馈压力中退出。

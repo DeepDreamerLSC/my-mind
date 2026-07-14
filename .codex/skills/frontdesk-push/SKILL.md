@@ -29,7 +29,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --dry-ru
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --limit 5
 ```
 
-默认会读取 `85_运行记录/前台推送状态.json`，跳过 24 小时内已经推送但尚未收到反馈的条目，避免 OpenClaw 反复催同一批内容。调整冷却时间：
+默认会读取 `85_运行记录/前台推送状态.json`。生成文件只把条目标记为 `prepared`；已 `published`、已真实 `sent` 或已有反馈的条目不会被重新当作普通候选。调整 `prepared` 冷却时间：
 
 ```bash
 python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --cooldown-hours 48
@@ -75,6 +75,7 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 ## 工作边界
 
 - 只生成前台推送文件。
+- 生成推送稿不等于真实发送；本脚本只写 `prepared_at` / `delivery_stage: prepared`，不得写 `sent_at`。
 - 不修改 `00_收件箱/`。
 - 不写入长期知识目录。
 - 不确认事实、观点、项目决策或沉淀结果。
@@ -82,7 +83,8 @@ python3 .codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py --excerp
 - 推送优先级来自流转区；流转区缺失时才回退到收件箱评分排序。
 - 默认不推送 `内容质量: 需继续解析` 或 `内容质量: 需核验` 的条目；需要临时包含时显式加 `--include-low-quality`。
 - 默认不推送已经有正式/已吸收长期知识回链的收件箱来源；需要调试时显式加 `--include-promoted`。
-- 推送状态只记录触达和反馈状态，不改变长期知识。
+- 旧版无真实发送证据的记录保持 `delivery_stage` 为空并标记 `legacy_delivery: unknown`，不进入待反馈统计。
+- 推送状态只记录交付和反馈状态，不改变长期知识。
 
 ## 设计依据
 

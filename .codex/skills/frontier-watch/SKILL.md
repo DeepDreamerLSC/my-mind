@@ -75,6 +75,14 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py --no-translate-su
 
 ## 门禁
 
+显式 `--write-inbox` 前先检查当前库存。任一条件成立时直接跳过，不抓取、不入箱、不生成新运行报告：
+
+- 未读大于 10。
+- 有真实回执的 `sent` 待反馈大于 3。
+- 待确认大于 5。
+
+旧版 `legacy_delivery: unknown`、`prepared` 和 `published` 均不计入已发送待反馈。`--dry-run --write-inbox` 也不会写入文件。
+
 入选项必须：
 
 - 来自配置里的高质量来源。

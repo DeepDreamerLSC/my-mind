@@ -7,15 +7,24 @@ import argparse
 import datetime as dt
 import json
 import re
+import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[4]
+LIB_DIR = ROOT / ".codex/lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+import frontdesk_delivery as delivery
+
+
 TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 QUEUE_NAME = "前台反馈队列.jsonl"
 CONFIRM_QUEUE_MD = ROOT / "05_流转区/50_待确认/待确认队列.md"
+TODAY_ACTION_MD = DEFAULT_RUN_DIR / "后台总览/今日动作.md"
 
 
 ACTION_ALIASES = [
@@ -55,6 +64,11 @@ def latest_push_file(run_dir: Path) -> Path | None:
 
 
 def default_context_file(run_dir: Path, action: str) -> Path | None:
+    today_action = run_dir / "后台总览/今日动作.md"
+    if today_action.exists():
+        return today_action
+    if TODAY_ACTION_MD.exists():
+        return TODAY_ACTION_MD
     if action in CONFIRM_ACTIONS and CONFIRM_QUEUE_MD.exists():
         return CONFIRM_QUEUE_MD
     return latest_push_file(run_dir)
@@ -66,17 +80,17 @@ def parse_push_targets(path: Path | None) -> dict[str, dict[str, object]]:
     targets: dict[str, dict[str, object]] = {}
     current: str | None = None
     for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
-        heading = re.match(r"^###\s+(\d+)\.\s+(.+)", line)
+        heading = re.match(r"^#{2,3}\s+(\d+)\.\s+(.+)", line)
         if heading:
             current = heading.group(1)
             targets[current] = {"目标标题": heading.group(2).strip()}
             continue
         if current is None:
             continue
-        source = re.match(r"^- 来源文件：`(.+)`", line)
+        source = re.match(r"^- (?:来源文件|来源)：`(.+)`", line)
         if source:
             targets[current]["来源文件"] = source.group(1).strip()
-        candidate = re.match(r"^- 候选文件：(.+)", line)
+        candidate = re.match(r"^- (?:候选文件|目标)：(.+)", line)
         if candidate:
             paths = re.findall(r"`([^`]+)`", candidate.group(1))
             if paths:
@@ -147,6 +161,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR), help="Run record directory.")
     parser.add_argument("--queue", default="", help="Feedback queue path. Defaults to --run-dir/前台反馈队列.jsonl.")
     parser.add_argument("--push-file", default="", help="Frontdesk push file used to resolve target number.")
+    parser.add_argument("--push-state", default="", help="Delivery state path. Defaults to --run-dir/前台推送状态.json.")
     parser.add_argument("--source", default="OpenClaw", help="Feedback source.")
     parser.add_argument("--channel", default="", help="OpenClaw channel, such as 微信 or Telegram.")
     parser.add_argument("--dry-run", action="store_true", help="Print JSON record instead of appending.")
@@ -161,6 +176,9 @@ def main() -> int:
     queue_path = Path(args.queue) if args.queue else run_dir / QUEUE_NAME
     if not queue_path.is_absolute():
         queue_path = ROOT / queue_path
+    state_path = Path(args.push_state) if args.push_state else run_dir / "前台推送状态.json"
+    if not state_path.is_absolute():
+        state_path = ROOT / state_path
     target, action, target_type, content = parse_reply(args.reply)
     push_path = Path(args.push_file) if args.push_file else default_context_file(run_dir, action)
     if push_path and not push_path.is_absolute():
@@ -189,9 +207,33 @@ def main() -> int:
         print(line)
         return 0
 
+    source_file = str(record.get("来源文件") or "")
+    state: dict[str, object] | None = None
+    state_changed = False
+    if source_file and state_path.exists():
+        state = delivery.load_state(state_path)
+        state_changed = delivery.mark_feedback_received(
+            state,
+            source_file,
+            at=str(record["时间"]),
+            action=str(record["动作"]),
+            content=str(record.get("内容") or record.get("原始回复") or ""),
+        )
+
     queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_existed = queue_path.exists()
+    original_size = queue_path.stat().st_size if queue_existed else 0
     with queue_path.open("a", encoding="utf-8") as file:
         file.write(line + "\n")
+    try:
+        if state is not None and state_changed:
+            delivery.save_state(state_path, state)
+    except Exception:
+        with queue_path.open("r+b") as file:
+            file.truncate(original_size)
+        if not queue_existed and original_size == 0:
+            queue_path.unlink(missing_ok=True)
+        raise
     print(queue_path.relative_to(ROOT) if queue_path.is_relative_to(ROOT) else queue_path)
     return 0
 

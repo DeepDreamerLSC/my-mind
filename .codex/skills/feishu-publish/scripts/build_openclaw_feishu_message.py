@@ -13,7 +13,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 DEFAULT_RECORD_FILE = DEFAULT_RUN_DIR / "飞书发布记录.jsonl"
-DEFAULT_CONFIRMATION_FILE = DEFAULT_RUN_DIR / "后台总览" / "OpenClaw待提醒.md"
 
 
 def repo_relative(path: Path) -> str:
@@ -280,8 +279,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-items", type=int, default=3, help="Maximum item highlights. Use 0 for all.")
     parser.add_argument("--summary-chars", type=int, default=90, help="Maximum summary characters per highlighted item.")
     parser.add_argument("--chunk-size", type=int, default=0, help="Split output into chunks no longer than this many characters. 0 disables splitting.")
-    parser.add_argument("--confirmation-file", default=str(DEFAULT_CONFIRMATION_FILE), help="OpenClaw reminder markdown that contains 待确认候选.")
-    parser.add_argument("--confirmation-max-items", type=int, default=2, help="Maximum confirmation items appended to the message. 0 disables.")
+    parser.add_argument("--confirmation-file", default="", help="Explicit legacy reminder markdown that contains 待确认候选.")
+    parser.add_argument("--confirmation-max-items", type=int, default=0, help="Maximum legacy confirmation items appended to the message. 0 disables.")
     parser.add_argument("--allow-stale", action="store_true", help="Allow latest published Feishu record even if it does not match the latest push.")
     parser.add_argument("--allow-legacy-reading-page", action="store_true", help="Allow old single-page reading records when no bundle index exists.")
     parser.add_argument("--json", action="store_true", help="Output structured JSON instead of plain text.")
@@ -296,8 +295,8 @@ def main() -> int:
     record_file = Path(args.record_file)
     if not record_file.is_absolute():
         record_file = ROOT / record_file
-    confirmation_file = Path(args.confirmation_file)
-    if not confirmation_file.is_absolute():
+    confirmation_file = Path(args.confirmation_file) if args.confirmation_file else None
+    if confirmation_file and not confirmation_file.is_absolute():
         confirmation_file = ROOT / confirmation_file
     push_path = Path(args.push_file) if args.push_file else latest_push(run_dir)
     if not push_path.is_absolute():
@@ -320,7 +319,7 @@ def main() -> int:
         )
         return 2
 
-    confirmation_items = load_confirmation_items(confirmation_file, max(0, args.confirmation_max_items))
+    confirmation_items = load_confirmation_items(confirmation_file, max(0, args.confirmation_max_items)) if confirmation_file else []
     message = render_message(record, max(0, args.max_items), max(0, args.summary_chars), confirmation_items)
     chunks = split_chunks(message, args.chunk_size)
     if args.json:

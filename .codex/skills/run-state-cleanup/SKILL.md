@@ -42,6 +42,7 @@ python3 .codex/skills/run-state-cleanup/scripts/plan_run_state_cleanup.py --json
 - 按类别统计的未提交改动。
 - 每类样例、建议动作和建议提交批次。
 - 敏感文件或本地配置风险。
+- 根级运行 JSONL 中的 `space_id`、`node_token`、`obj_token`、`page_token` 等外部对象标识字段；报告只列字段名，不回显值。
 - 时间戳运行记录、固定视图、收件箱状态、流转区视图、飞书精选页和技能代码的分离建议。
 
 ## Automation
@@ -60,4 +61,5 @@ python3 .codex/skills/run-state-cleanup/scripts/plan_run_state_cleanup.py --writ
 - 不删除旧报告、不归档文件、不重写历史。
 - 不修改 `00_收件箱`、`05_流转区` 或长期知识正文。
 - 不把本地 `.local.json`、密钥、环境文件纳入提交建议；只提示风险。
+- 外部对象标识先迁移到已忽略的 `*.local.jsonl` 或环境变量，再单独评审历史脱敏；本 skill 不覆盖历史发布记录。
 - 代码批次和运行状态批次必须分开提交。

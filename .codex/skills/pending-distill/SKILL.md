@@ -90,7 +90,7 @@ Recommended OpenClaw reply forms:
 1 我的判断是：...
 ```
 
-Codex backend consumes those replies through `frontdesk-feedback`, runs the promotion gate, then updates source notes, candidate notes, confirmation queue status, and Feishu sync state.
+Codex backend consumes those replies through `frontdesk-feedback`, runs the promotion gate, then updates source notes, candidate notes, confirmation queue status, and Feishu sync state.已被门禁拦截的候选保留为后台 `需继续核验`，不会在后续待沉淀刷新时重新写回用户待确认。
 
 ## Automation
 

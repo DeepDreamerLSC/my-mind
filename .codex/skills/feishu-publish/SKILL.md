@@ -9,11 +9,40 @@ description: Publish or prepare my-mind frontdesk push notes as Feishu/Lark精�
 
 ## 快速使用
 
-OpenClaw 默认只调用这个单一出口；它会先查找与最新前台推送匹配的已发布飞书精选 bundle，如果没有就先发布，再输出可直接转发给用户的短消息：
+手动发布飞书精选时，OpenClaw 可调用这个出口；它会先查找与最新前台推送匹配的已发布飞书精选 bundle，如果没有就先发布，再输出可直接转发给用户的短消息：
 
 ```bash
 python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py
 ```
+
+日常 OpenClaw 提醒必须走唯一入口 `今日动作.json`，不能无参数调用上面的 bundle 命令，也不能读取旧推送或 `OpenClaw待提醒.md`：
+
+```bash
+python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py \
+  --today-action "85_运行记录/后台总览/今日动作.json"
+```
+
+这个模式不发布飞书页面；输出为空时保持静默。实际发送成功并拿到消息 ID 后，记录同一份今日动作的回执，避免未变化的动作被重复提醒：
+
+```bash
+python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py \
+  --today-action "85_运行记录/后台总览/今日动作.json" \
+  --ack-today-action-sent \
+  --channel 飞书 \
+  --message-id "OpenClaw 返回的消息 ID"
+```
+
+页面可访问后，交付状态只到 `published`。OpenClaw 实际发送成功后，必须用外部消息 ID 或幂等键单独记录回执；这个命令本身不发送消息：
+
+```bash
+python3 .codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py \
+  --ack-sent \
+  --push-file "85_运行记录/前台推送-YYYY-MM-DD-HHMM.md" \
+  --channel 飞书 \
+  --message-id "OpenClaw 返回的消息 ID"
+```
+
+没有消息 ID 时可改用 `--idempotency-key`。缺少渠道或两类外部证据时，脚本拒绝进入 `sent`；重复同一回执为幂等操作。
 
 消息太长时可拆分：
 
@@ -139,7 +168,8 @@ python3 .codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py \
 
 执行归属：
 
-- OpenClaw 负责在前台定时任务或用户手动要求时触发链路：生成前台推送、调用 `prepare_openclaw_feishu_message.py`、转发脚本输出。
+- OpenClaw 对日常定时提醒只读取 `今日动作.json`，调用 `prepare_openclaw_feishu_message.py --today-action ...`，并在真实发送后记录回执；不得回退到前台推送或旧提醒文件。
+- 用户手动要求飞书精选或手机阅读页时，OpenClaw 才触发前台推送、bundle 发布和默认 `prepare_openclaw_feishu_message.py` 链路。
 - `feishu-publish` 负责发布、复用、更新、记录和消息出口；OpenClaw 不直接拼接原文链接，也不直接解析 `前台推送-*.md` 生成最终消息。
 - Codex 负责维护这个 skill、处理失败记录、调整门禁和修复发布链路。
 
@@ -175,4 +205,4 @@ OpenClaw 的前台消息只发送：
 
 完整阅读内容放在飞书页中。
 
-脚本生成消息不等于 OpenClaw 已经实际触达用户。OpenClaw 发送后如果收到回复，必须调用 `frontdesk-feedback` 入队脚本；后台总览会观察“已推送未反馈多但反馈队列为空”的风险。
+脚本生成消息不等于 OpenClaw 已经实际触达用户。OpenClaw 发送成功后先记录显式回执，再在收到回复时调用 `frontdesk-feedback` 入队脚本；后台只把有回执的 `sent` 条目计为已发送待反馈。

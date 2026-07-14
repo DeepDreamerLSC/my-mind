@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
 import tomllib
 from collections import Counter
 from pathlib import Path
@@ -18,6 +19,13 @@ from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[4]
+LIB_DIR = ROOT / ".codex/lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+import frontdesk_delivery as delivery
+
+
 TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_INBOX = ROOT / "00_收件箱"
 DEFAULT_FLOW_DIR = ROOT / "05_流转区"
@@ -29,6 +37,8 @@ DEFAULT_CONFIRMATION_QUEUE = DEFAULT_RUN_DIR / "待确认事项.jsonl"
 DEFAULT_DASHBOARD_DIR = DEFAULT_RUN_DIR / "后台总览"
 DEFAULT_DASHBOARD_DATA_FILE = DEFAULT_DASHBOARD_DIR / "飞书仪表盘数据.json"
 DEFAULT_DASHBOARD_CSV_DIR = DEFAULT_DASHBOARD_DIR / "飞书仪表盘数据"
+DEFAULT_TODAY_ACTION_JSON = DEFAULT_DASHBOARD_DIR / "今日动作.json"
+DEFAULT_TODAY_ACTION_MARKDOWN = DEFAULT_DASHBOARD_DIR / "今日动作.md"
 EXPECTED_PAUSED_AUTOMATIONS = {
     "收件箱待分拣巡检": "已并入 my-mind 后台总控日更",
     "前沿情报每日入箱": "已并入 my-mind 后台总控日更",
@@ -159,6 +169,7 @@ def inspect_inbox(inbox: Path) -> dict[str, Any]:
     quality_counter: Counter[str] = Counter()
     low_quality: list[dict[str, str]] = []
     inactive_low_quality: list[dict[str, str]] = []
+    unread: list[dict[str, Any]] = []
     total = 0
     for path in sorted(inbox.glob("*.md")):
         if path.name == "目录说明.md":
@@ -168,9 +179,20 @@ def inspect_inbox(inbox: Path) -> dict[str, Any]:
         status = str(meta.get("处理状态") or "未知")
         parse_status = str(meta.get("解析状态") or "未知")
         quality = str(meta.get("内容质量") or "未标记")
+        reading_status = str(meta.get("阅读状态") or "未读")
         status_counter[status] += 1
         parse_counter[parse_status] += 1
         quality_counter[quality] += 1
+        if reading_status != "已读" and status not in {"已处理", "已晋升", "已归档", "可丢弃"}:
+            unread.append(
+                {
+                    "path": repo_rel(path),
+                    "title": str(meta.get("标题") or path.stem),
+                    "status": status,
+                    "reading_status": reading_status,
+                    "is_auto": str(meta.get("资料类型") or "") == "前沿情报" or str(meta.get("解析工具") or "") == "frontier-watch",
+                }
+            )
         if quality in {"需继续解析", "需核验"} or parse_status in {"解析失败", "部分解析"}:
             item = {
                 "path": repo_rel(path),
@@ -195,6 +217,8 @@ def inspect_inbox(inbox: Path) -> dict[str, Any]:
         "low_quality_count": len(low_quality),
         "inactive_low_quality_count": len(inactive_low_quality),
         "inactive_low_quality": inactive_low_quality[:12],
+        "unread_count": len(unread),
+        "unread": unread[:30],
     }
 
 
@@ -278,67 +302,123 @@ def inspect_confirmations(queue_path: Path) -> dict[str, Any]:
     records = load_jsonl(queue_path)
     by_status = Counter(str(record.get("处理状态") or record.get("状态") or "未知") for record in records)
     pending: list[dict[str, Any]] = []
+    verification: list[dict[str, Any]] = []
+    promotion_gate_count = 0
     pending_statuses = {"待确认", "待处理", "需要确认", "已有候选待确认"}
+    verification_statuses = {"需继续核验", "待核验", "需继续解析或核验"}
     for record in records:
         status = str(record.get("处理状态") or record.get("状态") or "")
-        if status not in pending_statuses and not status.endswith("待确认"):
+        stage = str(record.get("状态") or "")
+        result = str(record.get("确认处理结果") or record.get("处理结果") or "")
+        if status in pending_statuses and "转正门禁未通过" in result:
+            status = "需继续核验"
+        if status in pending_statuses and stage in verification_statuses:
+            status = stage
+        if status not in pending_statuses and not status.endswith("待确认") and status not in verification_statuses:
             continue
         candidate = record.get("候选文件") or ""
         existing = record.get("已有候选")
         if not candidate and isinstance(existing, list) and existing:
             candidate = existing[0]
-        pending.append(
-            {
-                "title": record.get("标题") or "未命名待确认事项",
-                "priority": record.get("优先级") or "中",
-                "type": record.get("类型") or "未分类",
-                "status": status,
-                "source": record.get("来源文件") or "",
-                "candidate": candidate,
-                "replies": record.get("可回复") or [],
-            }
-        )
+        item = {
+            "title": record.get("标题") or "未命名待确认事项",
+            "priority": record.get("优先级") or "中",
+            "type": record.get("类型") or "未分类",
+            "status": status,
+            "source": record.get("来源文件") or "",
+            "candidate": candidate,
+            "replies": record.get("可回复") or [],
+            "result": result,
+        }
+        if status in verification_statuses:
+            if "转正门禁未通过" in result:
+                promotion_gate_count += 1
+            verification.append(item)
+        else:
+            pending.append(item)
     return {
         "total": len(records),
         "by_status": dict(by_status),
         "pending_count": len(pending),
         "pending": pending[:8],
+        "verification_count": len(verification),
+        "promotion_gate_count": promotion_gate_count,
+        "verification": verification[:8],
     }
 
 
 def inspect_push_state(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"exists": False, "items": 0, "waiting_feedback": 0, "cooling": 0, "recent": []}
+        return {"exists": False, "items": 0, "waiting_feedback": 0, "waiting": [], "legacy_unknown": 0, "cooling": 0, "recent": []}
     try:
         data = json.loads(read_text(path))
     except json.JSONDecodeError:
-        return {"exists": True, "error": "前台推送状态 JSON 解析失败", "items": 0, "waiting_feedback": 0, "cooling": 0}
+        return {"exists": True, "error": "前台推送状态 JSON 解析失败", "items": 0, "waiting_feedback": 0, "waiting": [], "legacy_unknown": 0, "cooling": 0}
+    if not isinstance(data, dict):
+        data = delivery.empty_state()
+    try:
+        delivery.normalize_state(data)
+    except ValueError as exc:
+        return {
+            "exists": True,
+            "error": str(exc),
+            "items": 0,
+            "waiting_feedback": 0,
+            "waiting": [],
+            "legacy_unknown": 0,
+            "cooling": 0,
+            "recent": [],
+        }
     items = data.get("items") if isinstance(data, dict) else {}
     if not isinstance(items, dict):
         items = {}
-    waiting = []
+    waiting: list[dict[str, Any]] = []
     recent = []
+    stages: Counter[str] = Counter()
+    legacy_unknown = 0
     now = dt.datetime.now(TZ)
     cooling = 0
     for item_id, item in items.items():
         if not isinstance(item, dict):
             continue
-        status = str(item.get("feedback_status") or "")
-        last_pushed = str(item.get("last_pushed_at") or "")
-        if status == "待反馈":
-            waiting.append(item)
+        stage = str(item.get("delivery_stage") or "")
+        stages[stage or "unknown"] += 1
+        if not stage and str(item.get("legacy_delivery") or "") == "unknown":
+            legacy_unknown += 1
+        event_at = str(
+            item.get("applied_at")
+            or item.get("feedback_received_at")
+            or item.get("sent_at")
+            or item.get("published_at")
+            or item.get("prepared_at")
+            or item.get("last_pushed_at")
+            or ""
+        )
+        if stage == "sent":
+            waiting.append(
+                {
+                    "item_id": item_id,
+                    "source": str(item.get("source_file") or item_id),
+                    "title": str(item.get("title") or item_id),
+                    "sent_at": str(item.get("sent_at") or ""),
+                    "channel": str(item.get("sent_channel") or ""),
+                }
+            )
         try:
-            pushed_at = dt.datetime.fromisoformat(last_pushed)
-            if now - pushed_at < dt.timedelta(hours=24) and status == "待反馈":
+            prepared_at = dt.datetime.fromisoformat(str(item.get("prepared_at") or ""))
+            if now - prepared_at < dt.timedelta(hours=24) and stage == "prepared":
                 cooling += 1
         except ValueError:
             pass
-        recent.append({"item_id": item_id, "title": item.get("title", ""), "last_pushed_at": last_pushed, "feedback_status": status})
-    recent.sort(key=lambda item: str(item.get("last_pushed_at") or ""), reverse=True)
+        recent.append({"item_id": item_id, "title": item.get("title", ""), "event_at": event_at, "delivery_stage": stage, "legacy_delivery": item.get("legacy_delivery", "")})
+    recent.sort(key=lambda item: str(item.get("event_at") or ""), reverse=True)
     return {
         "exists": True,
         "items": len(items),
         "waiting_feedback": len(waiting),
+        "waiting": waiting[:12],
+        "legacy_unknown": legacy_unknown,
+        "stages": dict(stages),
         "cooling": cooling,
         "recent": recent[:8],
     }
@@ -525,6 +605,146 @@ def sentence(value: Any) -> str:
     return str(value or "").strip().rstrip("。.!！")
 
 
+def _dedupe_action_items(items: list[dict[str, Any]], limit: int) -> list[dict[str, str]]:
+    selected: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in items:
+        source = str(item.get("source") or "").strip()
+        if not source or source in seen:
+            continue
+        seen.add(source)
+        selected.append({key: str(value) for key, value in item.items() if value not in (None, "", [])})
+        if len(selected) >= max(1, limit):
+            break
+    return selected
+
+
+def build_today_action(data: dict[str, Any], limit: int = 3) -> dict[str, Any]:
+    push_state = data.get("push_state") or {}
+    confirmations = data.get("confirmations") or {}
+    inbox = data.get("inbox") or {}
+
+    waiting = [
+        {
+            "source": item.get("source") or item.get("item_id"),
+            "title": item.get("title") or "待阅读内容",
+            "action": "阅读",
+            "reason": "已真实发送，等待阅读反馈",
+        }
+        for item in push_state.get("waiting", [])
+        if isinstance(item, dict)
+    ]
+    priority = {"紧急": 0, "高": 1, "中": 2, "低": 3}
+    confirmation_rows = sorted(
+        [item for item in confirmations.get("pending", []) if isinstance(item, dict)],
+        key=lambda item: (priority.get(str(item.get("priority") or "中"), 9), str(item.get("title") or "")),
+    )
+    confirmation_items = [
+        {
+            "source": item.get("source") or item.get("candidate") or f"confirmation:{item.get('title') or 'untitled'}",
+            "title": item.get("title") or "待确认候选",
+            "action": "确认",
+            "reason": "候选等待确认转正、继续核验、调整分类或跳过",
+            "target": item.get("candidate") or "",
+        }
+        for item in confirmation_rows
+    ]
+    repair_items = [
+        {
+            "source": item.get("path"),
+            "title": item.get("title") or "待核验内容",
+            "action": "补充判断/核验",
+            "reason": item.get("gate") or "解析或内容质量尚未通过门禁",
+        }
+        for item in inbox.get("low_quality", [])
+        if isinstance(item, dict)
+    ]
+    unread_rows = sorted(
+        [item for item in inbox.get("unread", []) if isinstance(item, dict)],
+        key=lambda item: (bool(item.get("is_auto")), str(item.get("title") or "")),
+    )
+    unread_items = [
+        {
+            "source": item.get("path"),
+            "title": item.get("title") or "待读内容",
+            "action": "阅读",
+            "reason": "自动情报待读" if item.get("is_auto") else "用户主动入箱待读",
+        }
+        for item in unread_rows
+    ]
+
+    for action_type, candidates in (
+        ("阅读", waiting),
+        ("确认", confirmation_items),
+        ("补充判断/核验", repair_items),
+        ("阅读", unread_items),
+    ):
+        items = _dedupe_action_items(candidates, min(max(1, limit), 3))
+        if items:
+            return {
+                "version": 1,
+                "action_type": action_type,
+                "items": items,
+                "inventory": {
+                    "unread": int(inbox.get("unread_count") or len(inbox.get("unread", []))),
+                    "sent_waiting_feedback": int(push_state.get("waiting_feedback") or 0),
+                    "pending_confirmations": int(confirmations.get("pending_count") or 0),
+                },
+            }
+    return {
+        "version": 1,
+        "action_type": "暂无动作",
+        "items": [],
+        "inventory": {
+            "unread": int(inbox.get("unread_count") or 0),
+            "sent_waiting_feedback": int(push_state.get("waiting_feedback") or 0),
+            "pending_confirmations": int(confirmations.get("pending_count") or 0),
+        },
+    }
+
+
+def render_today_action(payload: dict[str, Any]) -> str:
+    items = list(payload.get("items") or [])
+    inventory = payload.get("inventory") or {}
+    lines = [
+        "# 今日动作",
+        "",
+        f"- 动作类型：{payload.get('action_type') or '暂无动作'}",
+        f"- 数量：{len(items)}",
+        f"- 库存：未读 {inventory.get('unread', 0)} / 已发送待反馈 {inventory.get('sent_waiting_feedback', 0)} / 待确认 {inventory.get('pending_confirmations', 0)}",
+        "",
+    ]
+    if not items:
+        lines.append("当前无需动作。")
+    for index, item in enumerate(items, start=1):
+        lines.extend(
+            [
+                f"### {index}. {item.get('title') or '未命名事项'}",
+                "",
+                f"- 动作：{item.get('action') or payload.get('action_type')}",
+                f"- 来源文件：`{item.get('source') or '未知'}`",
+                f"- 原因：{item.get('reason') or '按当前优先级进入今日动作'}",
+            ]
+        )
+        if item.get("target"):
+            lines.append(f"- 候选文件：`{item['target']}`")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _write_if_changed(path: Path, content: str) -> bool:
+    if path.exists() and read_text(path) == content:
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    return True
+
+
+def write_today_action_views(payload: dict[str, Any], *, json_path: Path, markdown_path: Path) -> int:
+    json_content = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    return int(_write_if_changed(json_path, json_content)) + int(_write_if_changed(markdown_path, render_today_action(payload)))
+
+
 def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     inbox = data["inbox"]
     flow = data["flow"]
@@ -565,13 +785,18 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         user_items.append(f"{confirmations['pending_count']} 条候选知识等待确认转正、继续核验、调整分类或跳过。")
         openclaw_items.append(f"提醒用户处理 {confirmations['pending_count']} 条待确认候选，优先展示标题、类型、候选文件和可回复动作。")
     if push_state.get("waiting_feedback"):
-        user_items.append(f"{push_state.get('waiting_feedback', 0)} 条前台内容已推送但仍未反馈，可由 OpenClaw 分批展示，不要求一次处理完。")
+        user_items.append(f"{push_state.get('waiting_feedback', 0)} 条前台内容有真实发送回执但仍未反馈，可由 OpenClaw 分批提醒，不要求一次处理完。")
         openclaw_items.append("用飞书精选链接或待确认队列做前台触达，不要让用户翻自动化日志。发送后如收到回复，必须写入前台反馈队列。")
     if not user_items:
         user_items.append("暂无必须由你立即处理的后台事项。")
 
     if feedback["pending_count"]:
         codex_items.append(f"消费 {feedback['pending_count']} 条前台反馈队列，回写阅读思考或执行待确认动作。")
+    if confirmations.get("promotion_gate_count"):
+        codex_items.append(f"处理 {confirmations['promotion_gate_count']} 条转正门禁未通过候选，先补全正文或完成核验，再决定是否重新进入用户确认。")
+    remaining_verification = int(confirmations.get("verification_count") or 0) - int(confirmations.get("promotion_gate_count") or 0)
+    if remaining_verification:
+        codex_items.append(f"处理 {remaining_verification} 条待解析/待核验确认事项，完成内容补全后再进入用户确认。")
     if inbox["low_quality_count"]:
         codex_items.append(f"继续处理 {inbox['low_quality_count']} 条低质量/需核验解析，优先运行解析质量修复。")
     if flow.get("待沉淀待消费", 0):
@@ -605,7 +830,7 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     if push_state.get("error"):
         risks.append(str(push_state["error"]))
     if push_state.get("waiting_feedback", 0) >= 5 and feedback["pending_count"] == 0:
-        risks.append("已推送未反馈较多但反馈队列为空，需要观察 OpenClaw 是否实际完成前台触达；脚本生成不等于消息已发送。")
+        risks.append("已发送待反馈较多但反馈队列为空，需要观察用户是否实际收到并完成阅读反馈。")
     if stale_runs:
         risks.append("最近运行记录可能过期：" + "；".join(stale_runs[:5]))
     if git.get("dirty_count", 0):
@@ -631,7 +856,7 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     if automation_errors or push_state.get("error"):
         level = "红色"
         summary = "存在配置或状态文件异常，需要 Codex 优先排查。"
-    elif confirmations["pending_count"] or feedback["pending_count"] or inbox["low_quality_count"] or unexpected_inactive_automations:
+    elif confirmations["pending_count"] or confirmations.get("verification_count") or feedback["pending_count"] or inbox["low_quality_count"] or unexpected_inactive_automations:
         level = "黄色"
         summary = "后台链路可运行，但存在待确认、待核验或待消费事项。"
     else:
@@ -739,7 +964,7 @@ def build_dashboard(data: dict[str, Any]) -> str:
             f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}（可消费 {flow['待沉淀待消费']}，已有候选 {flow['已有候选待确认']}，待补判断 {flow['待补判断']}），待核验 {flow['待核验']}",
             f"- 待确认候选：{confirmations['pending_count']} 条",
             f"- 前台反馈待消费：{feedback['pending_count']} 条",
-            f"- 已推送未反馈：{push_state.get('waiting_feedback', 0)} 条；24 小时冷却中：{push_state.get('cooling', 0)} 条",
+            f"- 已发送待反馈：{push_state.get('waiting_feedback', 0)} 条；准备冷却中：{push_state.get('cooling', 0)} 条；交付未知：{push_state.get('legacy_unknown', 0)} 条",
             "",
             "## 待确认候选预览",
             "",
@@ -779,51 +1004,7 @@ def build_dashboard(data: dict[str, Any]) -> str:
 
 
 def build_openclaw_brief(data: dict[str, Any]) -> str:
-    digest = data["digest"]
-    confirmations = data["confirmations"]
-    push_state = data["push_state"]
-    lines = [
-        "# OpenClaw待提醒",
-        "",
-        f"- 更新时间：{data['generated_at']}",
-        f"- 后台状态：{digest['level']}，{digest['summary']}",
-        "",
-        "## 转发原则",
-        "",
-        "- 只提醒用户需要处理或确认的事项。",
-        "- 不转发自动化日志、脚本输出和完整巡检报告。",
-        "- 优先给飞书知识库链接或候选标题；没有链接时再给本地路径。",
-        "",
-        "## 建议提醒",
-        "",
-    ]
-    append_list(lines, digest["openclaw_items"])
-    lines.extend(["", "## 待确认候选", ""])
-    if confirmations["pending"]:
-        for index, item in enumerate(confirmations["pending"][:5], start=1):
-            candidate = item.get("candidate") or "未定位候选文件"
-            lines.append(f"{index}. {item['title']}｜{item['type']}｜{item['priority']}")
-            lines.append(f"   - 候选：`{candidate}`")
-            lines.append("   - 可回复：确认转正 / 继续核验 / 调整分类 / 跳过")
-    else:
-        lines.append("- 暂无待确认候选。")
-    lines.extend(
-        [
-            "",
-            "## 前台反馈状态",
-            "",
-            f"- 已推送未反馈：{push_state.get('waiting_feedback', 0)} 条",
-            f"- 24 小时冷却中：{push_state.get('cooling', 0)} 条",
-        ]
-    )
-    if push_state.get("waiting_feedback", 0):
-        lines.extend(
-            [
-                "- 触达观察：脚本生成前台消息不等于用户已收到；如果你尚未实际发送，请先发送飞书精选链接或决策卡，再等待反馈。",
-                "- 回写要求：收到用户回复后，必须调用 `frontdesk-feedback` 入队脚本，不要只在聊天里口头确认。",
-            ]
-        )
-    return "\n".join(lines).rstrip() + "\n"
+    return render_today_action(build_today_action(data))
 
 
 def dashboard_value(value: Any) -> str:
@@ -926,8 +1107,9 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
     add_metric("待核验", flow["待核验"], category="流转区")
     add_metric("待确认候选", confirmations["pending_count"], category="确认")
     add_metric("前台反馈待消费", feedback["pending_count"], category="反馈")
-    add_metric("已推送未反馈", push_state.get("waiting_feedback", 0), category="前台")
-    add_metric("24小时冷却中", push_state.get("cooling", 0), category="前台")
+    add_metric("已发送待反馈", push_state.get("waiting_feedback", 0), category="前台")
+    add_metric("准备冷却中", push_state.get("cooling", 0), category="前台")
+    add_metric("交付未知", push_state.get("legacy_unknown", 0), category="前台")
     add_metric("工作区未提交改动", git.get("dirty_count", 0), category="工程")
     add_metric("决策审视报告", decision_reviews.get("total", 0), category="审视", unit="份")
     add_metric("代码质量审视报告", code_quality_reviews.get("total", 0), category="审视", unit="份")
@@ -978,7 +1160,7 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
         "前台触达",
         push_state.get("waiting_feedback", 0),
         state="需观察" if push_state.get("waiting_feedback", 0) else "正常",
-        conclusion=f"{push_state.get('waiting_feedback', 0)} 条已推送未反馈。",
+        conclusion=f"{push_state.get('waiting_feedback', 0)} 条有发送回执但未反馈；{push_state.get('legacy_unknown', 0)} 条旧记录交付未知。",
         owner="OpenClaw",
         next_action="确认飞书精选链接是否已真实发送；收到回复后写入前台反馈队列。",
         source="前台推送状态.json",
@@ -1129,8 +1311,9 @@ def build_dashboard_tables(data: dict[str, Any]) -> dict[str, Any]:
                 "生成时间": generated_at,
                 "标题": item.get("title") or "",
                 "来源文件": item.get("item_id") or "",
-                "最近推送时间": item.get("last_pushed_at") or "",
-                "反馈状态": item.get("feedback_status") or "",
+                "最近事件时间": item.get("event_at") or "",
+                "交付状态": item.get("delivery_stage") or "",
+                "旧版交付": item.get("legacy_delivery") or "",
             }
         )
 
@@ -1259,7 +1442,7 @@ def build_report(data: dict[str, Any]) -> str:
     if inbox["low_quality_count"]:
         actions.append("低质量或未完整解析条目不进入前台推送，先补 OCR、字幕或转写。")
     if push_state.get("waiting_feedback"):
-        actions.append("前台推送进入冷却，OpenClaw 不重复催同一批条目，除非用户主动要求。")
+        actions.append("已有真实发送回执的条目等待反馈，OpenClaw 不重复发送，只按今日动作节流提醒。")
     if flow.get("待沉淀待消费", 0):
         actions.append("待沉淀队列已有可消费内容，可自动生成候选草稿。")
     elif flow.get("已有候选待确认", 0):
@@ -1279,7 +1462,8 @@ def build_report(data: dict[str, Any]) -> str:
         f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}（可消费 {flow['待沉淀待消费']}，已有候选 {flow['已有候选待确认']}，待补判断 {flow['待补判断']}），待核验 {flow['待核验']}",
         f"- 待处理前台反馈：{feedback['pending_count']}",
         f"- 待确认候选：{confirmations['pending_count']}",
-        f"- 已推送未反馈：{push_state.get('waiting_feedback', 0)}",
+        f"- 已发送待反馈：{push_state.get('waiting_feedback', 0)}",
+        f"- 旧版交付未知：{push_state.get('legacy_unknown', 0)}",
         f"- 低质量或需核验条目：{inbox['low_quality_count']}",
         "",
         "## 建议动作",
@@ -1416,21 +1600,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dashboard-dir", default=str(DEFAULT_DASHBOARD_DIR))
     parser.add_argument("--dashboard-data-file", default=str(DEFAULT_DASHBOARD_DATA_FILE))
     parser.add_argument("--dashboard-csv-dir", default=str(DEFAULT_DASHBOARD_CSV_DIR))
+    parser.add_argument("--today-action-json", default=str(DEFAULT_TODAY_ACTION_JSON))
+    parser.add_argument("--today-action-markdown", default=str(DEFAULT_TODAY_ACTION_MARKDOWN))
     parser.add_argument("--format", choices=["markdown", "json"], default="markdown")
-    parser.add_argument("--view", choices=["report", "dashboard", "openclaw"], default="report")
-    parser.add_argument("--write", action="store_true", help="Write Markdown report and fixed dashboard files into 85_运行记录.")
+    parser.add_argument("--view", choices=["report", "dashboard", "openclaw", "today"], default="report")
+    write_mode = parser.add_mutually_exclusive_group()
+    write_mode.add_argument("--write", action="store_true", help="Refresh only the two canonical Today Action files.")
+    write_mode.add_argument("--write-diagnostics", action="store_true", help="Explicitly write timestamped reports and diagnostic dashboard exports.")
     parser.add_argument("--export-dashboard-data", action="store_true", help="Write structured JSON and CSV rows for Feishu Base dashboards.")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
+    if args.export_dashboard_data and not args.write_diagnostics:
+        raise SystemExit("--export-dashboard-data requires --write-diagnostics")
     data = collect(args)
+    today_action = build_today_action(data)
+    today_json = Path(args.today_action_json)
+    today_markdown = Path(args.today_action_markdown)
+    if not today_json.is_absolute():
+        today_json = ROOT / today_json
+    if not today_markdown.is_absolute():
+        today_markdown = ROOT / today_markdown
     if args.format == "json":
-        print(json.dumps(data, ensure_ascii=False, indent=2))
+        print(json.dumps(today_action if args.view == "today" else data, ensure_ascii=False, indent=2))
         return 0
 
-    if args.export_dashboard_data and not args.write:
+    if args.export_dashboard_data:
         dashboard_data_file = Path(args.dashboard_data_file)
         csv_dir = Path(args.dashboard_csv_dir)
         if not dashboard_data_file.is_absolute():
@@ -1446,9 +1643,16 @@ def main() -> int:
         report = build_dashboard(data)
     elif args.view == "openclaw":
         report = build_openclaw_brief(data)
+    elif args.view == "today":
+        report = render_today_action(today_action)
     else:
         report = build_report(data)
     if args.write:
+        write_today_action_views(today_action, json_path=today_json, markdown_path=today_markdown)
+        print(repo_rel(today_json))
+        print(repo_rel(today_markdown))
+        return 0
+    if args.write_diagnostics:
         run_dir = Path(args.run_dir)
         if not run_dir.is_absolute():
             run_dir = ROOT / run_dir
@@ -1470,13 +1674,16 @@ def main() -> int:
         if not csv_dir.is_absolute():
             csv_dir = ROOT / csv_dir
         data_paths = write_dashboard_data_exports(data, dashboard_data_file, csv_dir)
+        write_today_action_views(today_action, json_path=today_json, markdown_path=today_markdown)
         print(repo_rel(path))
         print(repo_rel(dashboard_path))
         print(repo_rel(openclaw_path))
         for data_path in data_paths:
             print(repo_rel(data_path))
-    else:
-        print(report, end="")
+        print(repo_rel(today_json))
+        print(repo_rel(today_markdown))
+        return 0
+    print(report, end="")
     return 0
 
 

@@ -27,24 +27,43 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --view das
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --view openclaw
 ```
 
-写入运行记录和固定总览：
+预览唯一的日常用户入口：
+
+```bash
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --view today
+```
+
+只固定覆盖“今日动作”两个文件，不生成时间戳报告：
+
+```bash
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --view today --write
+```
+
+刷新唯一的“今日动作”固定视图：
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --write
 ```
 
-`--write` 会同时写入：
+`--write` 只写入 `今日动作.json` 和 `今日动作.md`，相同输入重复运行不会改变内容。需要显式生成诊断快照和仪表盘导出时使用：
+
+```bash
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --write-diagnostics
+```
+
+`--write-diagnostics` 会写入：
 
 - `85_运行记录/后台总控巡检-*.md`：完整证据报告，供 Codex 排查。
 - `85_运行记录/后台总览/当前后台状态.md`：固定覆盖的用户状态面板。
-- `85_运行记录/后台总览/OpenClaw待提醒.md`：固定覆盖的前台提醒稿。
+- `85_运行记录/后台总览/OpenClaw待提醒.md`：兼容镜像，内容与“今日动作”一致，不是第二套动作来源。
 - `85_运行记录/后台总览/飞书仪表盘数据.json`：供飞书多维表格同步的结构化数据。
 - `85_运行记录/后台总览/飞书仪表盘数据/*.csv`：按表拆分的 CSV 数据。
+- `85_运行记录/后台总览/今日动作.json` 与 `今日动作.md`：同一动作类型、来源去重、最多 3 项的唯一日常入口。
 
-只导出飞书仪表盘数据：
+只导出飞书仪表盘数据。结构化导出属于诊断写入，必须显式授权：
 
 ```bash
-python3 .codex/skills/backend-control/scripts/backend_health_check.py --export-dashboard-data
+python3 .codex/skills/backend-control/scripts/backend_health_check.py --write-diagnostics --export-dashboard-data
 ```
 
 输出 JSON 供其他前台工具消费：
@@ -65,7 +84,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 - `code-quality-review` 的最新代码质量等级、验证缺口和提交门禁。
 - `85_运行记录/前台反馈队列.jsonl` 的待处理反馈。
 - `85_运行记录/待确认事项.jsonl` 的候选转正确认事项。
-- `85_运行记录/前台推送状态.json` 的冷却、已推送未反馈和重复触达风险。
+- `85_运行记录/前台推送状态.json` 的五态、交付未知、已发送待反馈和重复触达风险；只有 `sent` 计入待反馈。
 - 最近的分拣、门禁、前台推送、飞书发布、飞书同步和反馈消费记录。
 - 当前 git 工作区是否存在未提交改动。
 - 当前 git 工作区改动的治理分组，例如技能代码、收件箱状态、流转区视图、后台固定视图、时间戳运行记录和飞书精选页。
@@ -77,10 +96,12 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 - 把动作分成“需要用户处理”“Codex 后台应处理”“OpenClaw 前台应提醒”。
 - 待沉淀总数只代表流转区存量；只有“待沉淀可消费”才表示 Codex 应继续自动生成候选。
 - 固定总览要覆盖写入，避免用户翻多份历史自动化报告。
+- 今日动作只输出 `阅读`、`确认`、`补充判断/核验`、`暂无动作` 之一；相同输入重复刷新不写出内容变化。
+- 转正门禁失败或解析不足的候选属于 Codex 后台待核验，不得继续作为用户“确认转正”事项重复提醒。
 - 不删除文件，不改收件箱，不生成候选沉淀。
 - 若发现待处理反馈，建议优先运行 `frontdesk-feedback` 的消费脚本。
 - 若发现低质量解析，不建议进入前台推送。
-- OpenClaw 只读取 `OpenClaw待提醒.md` 进行前台沟通，不转发完整巡检报告。
+- OpenClaw 只读取“今日动作”；`OpenClaw待提醒.md` 仅为兼容镜像，不再单独生成另一组提醒。
 - 若已推送未反馈较多但反馈队列为空，明确标记“脚本生成不等于已触达”，提醒 OpenClaw 观察真实发送。
 - 若决策审视或代码质量审视出现高/红色风险，把它放入 Codex 后台应处理事项，必要时交给 OpenClaw 提醒用户确认。
 - 飞书仪表盘同步只读取结构化数据文件，不重复扫描仓库事实源。

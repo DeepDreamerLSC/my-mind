@@ -188,6 +188,119 @@ def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="ignore")
 
 
+def _frontmatter_value(text: str, key: str) -> str:
+    if not text.startswith("---"):
+        return ""
+    end = text.find("\n---", 3)
+    if end < 0:
+        return ""
+    match = re.search(rf"^{re.escape(key)}:\s*(.+)$", text[3:end], flags=re.M)
+    return match.group(1).strip().strip('"') if match else ""
+
+
+def _jsonl_records(path: Path) -> list[dict[str, object]]:
+    if not path.exists():
+        return []
+    records: list[dict[str, object]] = []
+    for line in read_text(path).splitlines():
+        if not line.strip():
+            continue
+        try:
+            value = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            records.append(value)
+    return records
+
+
+def inventory_gate(
+    inbox: Path,
+    push_state: Path,
+    confirmation_queue: Path,
+    *,
+    unread_limit: int = 10,
+    sent_waiting_limit: int = 3,
+    confirmation_limit: int = 5,
+) -> dict[str, object]:
+    unread = 0
+    for path in inbox.glob("*.md") if inbox.exists() else []:
+        if path.name == "目录说明.md":
+            continue
+        text = read_text(path)
+        reading = _frontmatter_value(text, "阅读状态") or "未读"
+        status = _frontmatter_value(text, "处理状态")
+        if reading != "已读" and status not in {"已处理", "已晋升", "已归档", "可丢弃"}:
+            unread += 1
+
+    sent_waiting = 0
+    state_error = False
+    if push_state.exists():
+        try:
+            state = json.loads(read_text(push_state))
+        except json.JSONDecodeError:
+            state = {}
+            state_error = True
+        items = state.get("items") if isinstance(state, dict) else {}
+        if isinstance(items, dict):
+            state_error = state_error or any(
+                isinstance(item, dict)
+                and str(item.get("delivery_stage") or "")
+                and str(item.get("delivery_stage") or "") not in {"prepared", "published", "sent", "feedback_received", "applied"}
+                for item in items.values()
+            )
+            sent_waiting = sum(
+                1
+                for item in items.values()
+                if isinstance(item, dict) and str(item.get("delivery_stage") or "") == "sent"
+            )
+
+    pending_statuses = {"待确认", "待处理", "需要确认", "已有候选待确认"}
+    confirmation_records = _jsonl_records(confirmation_queue)
+    confirmation_lines = [line for line in read_text(confirmation_queue).splitlines() if line.strip()] if confirmation_queue.exists() else []
+    confirmation_error = len(confirmation_records) != len(confirmation_lines)
+    pending_confirmations = sum(
+        1
+        for record in confirmation_records
+        if str(record.get("处理状态") or record.get("状态") or "") in pending_statuses
+        or str(record.get("处理状态") or record.get("状态") or "").endswith("待确认")
+    )
+    reasons: list[str] = []
+    if state_error:
+        reasons.append("推送状态无法解析")
+    if confirmation_error:
+        reasons.append("待确认队列包含无法解析的记录")
+    if unread > unread_limit:
+        reasons.append(f"未读 {unread}>{unread_limit}")
+    if sent_waiting > sent_waiting_limit:
+        reasons.append(f"已发送待反馈 {sent_waiting}>{sent_waiting_limit}")
+    if pending_confirmations > confirmation_limit:
+        reasons.append(f"待确认 {pending_confirmations}>{confirmation_limit}")
+    return {
+        "blocked": bool(reasons),
+        "unread": unread,
+        "sent_waiting_feedback": sent_waiting,
+        "pending_confirmations": pending_confirmations,
+        "reasons": reasons,
+    }
+
+
+def render_inventory_gate_skip(gate: dict[str, object]) -> str:
+    reasons = "；".join(str(reason) for reason in gate.get("reasons", [])) or "库存已达门禁"
+    return "\n".join(
+        [
+            "# 前沿情报巡检",
+            "",
+            "## 库存门禁",
+            "",
+            f"- 状态：已跳过自动入箱（{reasons}）",
+            "- 本次入箱：0",
+            "- 未生成候选或新运行报告。",
+            "",
+        ]
+    )
+
+
 def clean_text(value: str, limit: int = 1200) -> str:
     value = html.unescape(value or "")
     value = re.sub(r"(?is)<(script|style).*?</\1>", " ", value)
@@ -867,6 +980,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sources", default=str(DEFAULT_SOURCES), help="JSON source config.")
     parser.add_argument("--inbox", default=str(DEFAULT_INBOX), help="Inbox directory.")
     parser.add_argument("--run-dir", default=str(DEFAULT_RUN_DIR), help="Run-report directory.")
+    parser.add_argument("--push-state", default="", help="Delivery state used by the automatic-intake inventory gate.")
+    parser.add_argument("--confirmation-queue", default="", help="Confirmation JSONL used by the automatic-intake inventory gate.")
     parser.add_argument("--lookback-days", type=int, default=14, help="Freshness window used for scoring.")
     parser.add_argument("--limit", type=int, default=3, help="Maximum selected items.")
     parser.add_argument("--per-category", type=int, default=1, help="Maximum items per category before filling remaining slots.")
@@ -895,6 +1010,17 @@ def main() -> int:
         inbox = ROOT / inbox
     if not run_dir.is_absolute():
         run_dir = ROOT / run_dir
+    push_state = Path(args.push_state) if args.push_state else run_dir / "前台推送状态.json"
+    confirmation_queue = Path(args.confirmation_queue) if args.confirmation_queue else run_dir / "待确认事项.jsonl"
+    if not push_state.is_absolute():
+        push_state = ROOT / push_state
+    if not confirmation_queue.is_absolute():
+        confirmation_queue = ROOT / confirmation_queue
+    if args.write_inbox:
+        gate = inventory_gate(inbox, push_state, confirmation_queue)
+        if gate["blocked"]:
+            print(render_inventory_gate_skip(gate), end="")
+            return 0
 
     if args.from_report:
         report_path = Path(args.from_report)
@@ -911,7 +1037,7 @@ def main() -> int:
         if not args.no_translate_summaries:
             for error in ensure_chinese_summaries(selected, timeout=max(args.translation_timeout, 2)):
                 failures.append(("中文摘要", error))
-        wrote_inbox = write_inbox_items(writable, inbox) if args.write_inbox else []
+        wrote_inbox = write_inbox_items(writable, inbox) if args.write_inbox and not args.dry_run else []
         report = render_report(
             selected,
             report_items,
@@ -982,7 +1108,7 @@ def main() -> int:
         for error in ensure_chinese_summaries(selected, timeout=max(args.translation_timeout, 2)):
             failures.append(("中文摘要", error))
 
-    wrote_inbox = write_inbox_items(selected, inbox) if args.write_inbox else []
+    wrote_inbox = write_inbox_items(selected, inbox) if args.write_inbox and not args.dry_run else []
     report = render_report(
         selected,
         candidates,

@@ -8,12 +8,20 @@ import datetime as dt
 import hashlib
 import json
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 
 ROOT = Path(__file__).resolve().parents[4]
+LIB_DIR = ROOT / ".codex/lib"
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
+
+import frontdesk_delivery as delivery
+
+
 TZ = ZoneInfo("Asia/Shanghai")
 DEFAULT_INBOX = ROOT / "00_收件箱"
 DEFAULT_FLOW_DIR = ROOT / "05_流转区"
@@ -113,23 +121,11 @@ def load_jsonl(path: Path) -> list[dict[str, object]]:
 
 
 def load_push_state(path: Path) -> dict[str, object]:
-    if not path.exists():
-        return {"version": 1, "items": {}}
-    try:
-        data = json.loads(read_text(path))
-    except json.JSONDecodeError:
-        return {"version": 1, "items": {}}
-    if not isinstance(data, dict):
-        return {"version": 1, "items": {}}
-    if not isinstance(data.get("items"), dict):
-        data["items"] = {}
-    data.setdefault("version", 1)
-    return data
+    return delivery.load_state(path)
 
 
 def save_push_state(path: Path, state: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    delivery.save_state(path, state)
 
 
 def apply_feedback_status_from_queue(state: dict[str, object], run_dir: Path) -> None:
@@ -164,47 +160,45 @@ def parse_iso_datetime(value: str) -> dt.datetime | None:
 
 
 def eligible_by_cooldown(note: InboxNote, state: dict[str, object], cooldown_hours: int) -> tuple[bool, str]:
-    if cooldown_hours <= 0:
-        return True, ""
     items = state.get("items")
     if not isinstance(items, dict):
         return True, ""
     item = items.get(note.item_id)
     if not isinstance(item, dict):
         return True, ""
-    if str(item.get("feedback_status") or "") != "待反馈":
+    stage = str(item.get("delivery_stage") or "")
+    if stage == "sent":
+        return False, "已真实发送，等待反馈"
+    if stage in {"feedback_received", "applied"}:
+        return False, f"交付状态为 {stage}"
+    if stage == "published":
+        return False, "页面已准备，等待发送回执"
+    if stage != "prepared" or cooldown_hours <= 0:
         return True, ""
-    pushed_at = parse_iso_datetime(str(item.get("last_pushed_at") or ""))
-    if not pushed_at:
+    prepared_at = parse_iso_datetime(str(item.get("prepared_at") or ""))
+    if not prepared_at:
         return True, ""
-    next_time = pushed_at + dt.timedelta(hours=cooldown_hours)
+    next_time = prepared_at + dt.timedelta(hours=cooldown_hours)
     if dt.datetime.now(TZ) < next_time:
-        return False, f"冷却中，上次推送 {pushed_at.strftime('%Y-%m-%d %H:%M')}"
+        return False, f"冷却中，上次准备 {prepared_at.strftime('%Y-%m-%d %H:%M')}"
     return True, ""
 
 
 def update_push_state(state: dict[str, object], selected: list[InboxNote], output_path: Path) -> None:
-    items = state.setdefault("items", {})
-    if not isinstance(items, dict):
-        state["items"] = {}
-        items = state["items"]
-    pushed_at = now_iso()
-    for note in selected:
-        previous = items.get(note.item_id)
-        if not isinstance(previous, dict):
-            previous = {}
-        previous_count = int(previous.get("push_count") or 0)
-        items[note.item_id] = {
-            **previous,
-            "title": note.title,
-            "source_file": note.item_id,
-            "content_hash": note.content_hash,
-            "last_pushed_at": pushed_at,
-            "last_push_file": output_path.relative_to(ROOT).as_posix() if output_path.is_relative_to(ROOT) else output_path.as_posix(),
-            "feedback_status": "待反馈",
-            "push_count": previous_count + 1,
-        }
-    state["updated_at"] = pushed_at
+    push_file = output_path.relative_to(ROOT).as_posix() if output_path.is_relative_to(ROOT) else output_path.as_posix()
+    delivery.mark_prepared(
+        state,
+        [
+            {
+                "title": note.title,
+                "source_file": note.item_id,
+                "content_hash": note.content_hash,
+            }
+            for note in selected
+        ],
+        push_file=push_file,
+        at=now_iso(),
+    )
 
 
 def split_frontmatter(text: str) -> tuple[dict[str, str], str]:
@@ -654,7 +648,7 @@ def build_push(notes: list[InboxNote], project_dir: Path, limit: int) -> str:
         f"- 生成时间：{now_datetime()}",
         "- 生成来源：Codex / frontdesk-push",
         f"- 候选条目：{len(notes)}",
-        "- 推送节流：默认跳过冷却期内且尚未收到反馈的条目；完整队列仍以 `05_流转区/` 为准。",
+        "- 交付节流：生成只进入 prepared；默认跳过已发布、已发送待反馈或已进入反馈处理的条目。",
         "- 用途：供飞书手机阅读页或 OpenClaw 前台摘要使用；OpenClaw 直接发消息时建议只转发标题、链接和回复指令。",
         "",
         "## 今天最值得读",
@@ -800,15 +794,16 @@ def main() -> int:
     all_notes = load_inbox_notes(inbox, max(args.excerpt_chars, 200), flow_priority, promoted_sources)
     if not args.include_low_quality:
         all_notes = [note for note in all_notes if note.content_quality not in LOW_QUALITY_STATUSES]
-    state = {"version": 1, "items": {}} if args.no_state else load_push_state(state_file)
+    state = delivery.empty_state() if args.no_state else load_push_state(state_file)
     if not args.no_state:
         apply_feedback_status_from_queue(state, run_dir)
-    if args.force or args.no_state:
+    if args.no_state:
         eligible = all_notes
     else:
         eligible = []
         for candidate in all_notes:
-            is_eligible, _reason = eligible_by_cooldown(candidate, state, max(args.cooldown_hours, 0))
+            cooldown_hours = 0 if args.force else max(args.cooldown_hours, 0)
+            is_eligible, _reason = eligible_by_cooldown(candidate, state, cooldown_hours)
             if is_eligible:
                 eligible.append(candidate)
     selected = eligible if args.limit <= 0 else eligible[: args.limit]

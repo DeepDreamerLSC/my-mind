@@ -21,6 +21,7 @@ DEFAULT_DATA_FILE = ROOT / "85_运行记录" / "后台总览" / "飞书仪表盘
 DEFAULT_CONFIG_FILE = ROOT / "85_运行记录" / "飞书仪表盘配置.local.json"
 DEFAULT_RECORD_FILE = ROOT / "85_运行记录" / "飞书仪表盘同步记录.jsonl"
 DEFAULT_LARK_PREFIX = 'OPENCLAW_HOME="$HOME/.openclaw" lark-cli'
+DEFAULT_COMMAND_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_FEISHU_DASHBOARD_COMMAND_TIMEOUT", "60"))
 DEFAULT_TABLE_MAP = {
     "cockpit": "后台驾驶舱",
     "metrics": "后台指标",
@@ -125,10 +126,27 @@ def shell_json_arg(value: Any) -> str:
     return shlex.quote(json.dumps(value, ensure_ascii=False))
 
 
-def run_command(command: str, *, dry_run: bool) -> dict[str, Any]:
+def run_command(command: str, *, dry_run: bool, timeout_seconds: int) -> dict[str, Any]:
     if dry_run:
         return {"ok": True, "dry_run": True, "command": command}
-    result = subprocess.run(command, cwd=ROOT, shell=True, text=True, capture_output=True, check=False)
+    try:
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            shell=True,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=max(timeout_seconds, 1),
+        )
+    except subprocess.TimeoutExpired as exc:
+        return {
+            "ok": False,
+            "returncode": 124,
+            "stdout": exc.stdout or "",
+            "stderr": f"command timed out after {max(timeout_seconds, 1)}s",
+            "command": command,
+        }
     payload: dict[str, Any] = {
         "ok": result.returncode == 0,
         "returncode": result.returncode,
@@ -228,10 +246,80 @@ def extract_record_key_rows(list_payload: dict[str, Any]) -> list[tuple[str, str
     return rows
 
 
+def extract_field_names(field_list_payload: dict[str, Any]) -> set[str]:
+    json_payload = field_list_payload.get("json") if isinstance(field_list_payload, dict) else None
+    if not isinstance(json_payload, dict):
+        return set()
+    data = json_payload.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("fields"), list):
+        return set()
+    names: set[str] = set()
+    for field in data["fields"]:
+        if isinstance(field, dict):
+            name = str(field.get("name") or "").strip()
+            if name:
+                names.add(name)
+    return names
+
+
+def ensure_table_fields(
+    *,
+    table_id: str,
+    rows: list[dict[str, Any]],
+    prefix: str,
+    identity: str,
+    base_token: str,
+    dry_run: bool,
+    command_timeout: int,
+) -> dict[str, Any]:
+    commands: list[str] = []
+    errors: list[str] = []
+    desired_fields = field_plan(rows)
+    if not desired_fields:
+        return {"created": 0, "errors": errors, "commands": commands}
+
+    list_cmd = lark_command(
+        prefix,
+        "+field-list",
+        identity=identity,
+        base_token=base_token,
+        args=["--table-id", table_id],
+    )
+    commands.append(list_cmd)
+    list_result = run_command(list_cmd, dry_run=dry_run, timeout_seconds=command_timeout)
+    if dry_run:
+        return {"created": 0, "errors": errors, "commands": commands}
+    if not list_result.get("ok"):
+        return {"created": 0, "errors": ["field-list 失败"], "commands": commands}
+
+    existing_names = extract_field_names(list_result)
+    created = 0
+    for field in desired_fields:
+        name = field["name"]
+        if name in existing_names:
+            continue
+        create_cmd = lark_command(
+            prefix,
+            "+field-create",
+            identity=identity,
+            base_token=base_token,
+            args=["--table-id", table_id, "--json", json.dumps(field, ensure_ascii=False)],
+        )
+        commands.append(create_cmd)
+        create_result = run_command(create_cmd, dry_run=dry_run, timeout_seconds=command_timeout)
+        if not create_result.get("ok"):
+            errors.append(f"field-create 失败:{name}")
+            continue
+        existing_names.add(name)
+        created += 1
+    return {"created": created, "errors": errors, "commands": commands}
+
+
 def refresh_dashboard_data(data_file: Path) -> None:
     command = [
         sys.executable,
         str(ROOT / ".codex" / "skills" / "backend-control" / "scripts" / "backend_health_check.py"),
+        "--write-diagnostics",
         "--export-dashboard-data",
         "--dashboard-data-file",
         str(data_file),
@@ -261,6 +349,7 @@ def init_tables(
     base_token: str,
     selected: set[str],
     dry_run: bool,
+    command_timeout: int,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for table_key, table in tables.items():
@@ -276,7 +365,13 @@ def init_tables(
             base_token=base_token,
             args=["--name", str(table_id), "--fields", json.dumps(fields, ensure_ascii=False)],
         )
-        results.append({"table": table_key, "operation": "table-create", "result": run_command(create_cmd, dry_run=dry_run)})
+        results.append(
+            {
+                "table": table_key,
+                "operation": "table-create",
+                "result": run_command(create_cmd, dry_run=dry_run, timeout_seconds=command_timeout),
+            }
+        )
     return results
 
 
@@ -291,6 +386,7 @@ def dedupe_table(
     delete_long_keys: bool,
     delete_stale: bool,
     current_keys: set[str],
+    command_timeout: int,
 ) -> dict[str, Any]:
     list_cmd = lark_command(
         prefix,
@@ -299,7 +395,7 @@ def dedupe_table(
         base_token=base_token,
         args=["--table-id", table_id, "--field-id", "记录键", "--limit", "200", "--format", "json"],
     )
-    list_result = run_command(list_cmd, dry_run=dry_run)
+    list_result = run_command(list_cmd, dry_run=dry_run, timeout_seconds=command_timeout)
     if dry_run:
         return {"table_key": table_key, "table_id": table_id, "deleted": 0, "duplicates": 0, "errors": [], "commands": [list_cmd]}
     if not list_result.get("ok"):
@@ -326,7 +422,7 @@ def dedupe_table(
         base_token=base_token,
         args=["--table-id", table_id, "--json", json.dumps({"record_id_list": delete_ids}, ensure_ascii=False), "--yes"],
     )
-    delete_result = run_command(delete_cmd, dry_run=dry_run)
+    delete_result = run_command(delete_cmd, dry_run=dry_run, timeout_seconds=command_timeout)
     errors = [] if delete_result.get("ok") else ["record-delete 失败"]
     return {
         "table_key": table_key,
@@ -348,6 +444,7 @@ def sync_table(
     base_token: str,
     dry_run: bool,
     max_rows: int,
+    command_timeout: int,
 ) -> dict[str, Any]:
     rows = list(table.get("rows") or [])
     if max_rows > 0:
@@ -357,6 +454,18 @@ def sync_table(
     skipped = 0
     errors: list[str] = []
     commands: list[str] = []
+
+    field_result = ensure_table_fields(
+        table_id=table_id,
+        rows=rows,
+        prefix=prefix,
+        identity=identity,
+        base_token=base_token,
+        dry_run=dry_run,
+        command_timeout=command_timeout,
+    )
+    commands.extend(field_result["commands"])
+    errors.extend([f"{table_key}/{error}" for error in field_result["errors"]])
 
     for row in rows:
         record_key = str(row.get(table.get("primary_key") or "记录键") or row.get("记录键") or "")
@@ -371,7 +480,7 @@ def sync_table(
             base_token=base_token,
             args=["--table-id", table_id, "--json", json.dumps(search_body, ensure_ascii=False), "--format", "json"],
         )
-        search_result = run_command(search_cmd, dry_run=dry_run)
+        search_result = run_command(search_cmd, dry_run=dry_run, timeout_seconds=command_timeout)
         record_id = "" if dry_run else extract_record_id(search_result, record_key)
         if not dry_run and not search_result.get("ok"):
             errors.append(f"{table_key}/{record_key} 搜索失败")
@@ -387,7 +496,7 @@ def sync_table(
             args=upsert_args,
         )
         commands.extend([search_cmd, upsert_cmd])
-        upsert_result = run_command(upsert_cmd, dry_run=dry_run)
+        upsert_result = run_command(upsert_cmd, dry_run=dry_run, timeout_seconds=command_timeout)
         if not upsert_result.get("ok"):
             errors.append(f"{table_key}/{record_key} 写入失败")
             continue
@@ -428,6 +537,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dedupe-only", action="store_true", help="Only delete duplicate Feishu rows; do not sync rows.")
     parser.add_argument("--delete-long-keys", action="store_true", help="During dedupe, also delete legacy rows whose 记录键 is longer than 50 characters.")
     parser.add_argument("--delete-stale", action="store_true", help="During dedupe, delete current-state rows whose 记录键 is no longer present locally. Keeps metric_history.")
+    parser.add_argument(
+        "--command-timeout",
+        type=int,
+        default=DEFAULT_COMMAND_TIMEOUT_SECONDS,
+        help="Timeout in seconds for each lark-cli command.",
+    )
     parser.add_argument("--write", action="store_true", help="Execute Feishu writes. Default is dry-run.")
     return parser.parse_args()
 
@@ -475,6 +590,7 @@ def main() -> int:
             base_token=base_token or "BASE_TOKEN",
             selected=selected,
             dry_run=dry_run,
+            command_timeout=max(args.command_timeout, 1),
         )
 
     sync_results: list[dict[str, Any]] = []
@@ -493,6 +609,7 @@ def main() -> int:
                     base_token=base_token or "BASE_TOKEN",
                     dry_run=dry_run,
                     max_rows=max(args.max_rows, 0),
+                    command_timeout=max(args.command_timeout, 1),
                 )
             )
 
@@ -518,6 +635,7 @@ def main() -> int:
                     delete_long_keys=args.delete_long_keys,
                     delete_stale=delete_stale,
                     current_keys=current_keys,
+                    command_timeout=max(args.command_timeout, 1),
                 )
             )
 
