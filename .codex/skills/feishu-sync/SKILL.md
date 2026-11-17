@@ -103,6 +103,7 @@ python3 .codex/skills/feishu-sync/scripts/sync_selected_notes.py --publish
 ## 工作边界
 
 - 默认同步 `20_资料库`，并同步其他显式标记的精选文档。
+- 已同步页面需要补来源封面、原始图片或视频关键帧时，使用 `feishu-publish/scripts/backfill_feishu_visuals.py --dry-run --lane library` 预演；该流程不回写本地正文，实际飞书写入必须显式使用 `--publish`。
 - 不扫描 `00_收件箱/` 和 `05_流转区/` 作为长期精选来源。
 - 不保存飞书凭证、space id 或目录 node token 到仓库文件。
 - 不把飞书侧编辑回写到本地正文。

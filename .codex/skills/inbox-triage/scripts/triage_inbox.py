@@ -14,6 +14,7 @@ TZ = ZoneInfo("Asia/Shanghai")
 
 DEFAULT_FLOW_DIR = Path("05_流转区")
 PROJECT_DESTINATION = "10_项目/个人数据资产系统/"
+EDU_AGENT_PROJECT_DESTINATION = "10_项目/edu-agent/"
 KNOWLEDGE_DESTINATION = "20_资料库/"
 ATOMIC_DESTINATION = "30_原子笔记/"
 PROMPT_DESTINATION = "75_提示词库/"
@@ -26,6 +27,7 @@ KNOWLEDGE_WORKFLOW_DESTINATION = "20_资料库/工作流与自动化/"
 KNOWLEDGE_VISUAL_DESTINATION = "20_资料库/设计与视觉/"
 KNOWLEDGE_MANAGEMENT_DESTINATION = "20_资料库/管理与组织/"
 KNOWLEDGE_WRITING_DESTINATION = "20_资料库/写作与表达/"
+KNOWLEDGE_EDUCATION_DESTINATION = "20_资料库/教育与学习/"
 PROMPT_CAPTURE_DESTINATION = "75_提示词库/收集与录入/"
 PROMPT_DISTILL_DESTINATION = "75_提示词库/萃取与整理/"
 PROMPT_ANALYSIS_DESTINATION = "75_提示词库/分析与研究/"
@@ -73,6 +75,66 @@ VISUAL_KEYWORDS = {"视觉", "高级感", "网页", "PPT", "排版", "配色"}
 INGEST_KEYWORDS = {"收件箱", "入箱", "录入", "capture", "剪藏"}
 DISTILL_KEYWORDS = {"萃取", "提炼", "整理", "总结", "结构化", "对话"}
 MANAGEMENT_KEYWORDS = {"管理", "团队", "组织", "领导", "管理者", "人才"}
+EDUCATION_KEYWORDS = {
+    "教育",
+    "教育科技",
+    "教育技术",
+    "教育 AI",
+    "教育AI",
+    "edtech",
+    "education",
+    "educational",
+    "教师",
+    "学生",
+    "课堂",
+    "课程",
+    "教学",
+    "学习科学",
+    "教学设计",
+    "教育测评",
+    "考试",
+    "错题",
+    "题库",
+    "学情",
+    "组卷",
+    "作文批改",
+    "智能辅导",
+    "个性化学习",
+    "自适应学习",
+    "学习分析",
+    "高校",
+    "K12",
+    "k-12",
+    "学术诚信",
+    "teacher",
+    "classroom",
+    "curriculum",
+    "pedagogy",
+    "learning science",
+    "instructional design",
+    "tutoring",
+    "academic integrity",
+}
+EDU_AGENT_KEYWORDS = {
+    "教育 AI",
+    "教育AI",
+    "ai in education",
+    "edtech",
+    "智能辅导",
+    "自适应学习",
+    "个性化学习",
+    "学习分析",
+    "教育测评",
+    "错题",
+    "题库",
+    "组卷",
+    "作文批改",
+    "OCR",
+    "ocr",
+    "题目裁切",
+    "版面理解",
+    "学术诚信",
+}
 WRITING_KEYWORDS = {"写作", "表达", "文章", "叙事"}
 INFRA_KEYWORDS = {"NVIDIA", "Jensen", "Huang", "CUDA", "TSMC", "HBM", "数据中心", "算力", "芯片", "供应链", "电力"}
 MARKET_KEYWORDS = {"商业", "市场", "客户", "定价", "收入", "营收", "adoption", "pricing"}
@@ -217,6 +279,14 @@ def has_ai_tool_material(text: str) -> bool:
         return True
     ai_context = bool(re.search(r"(?<![a-z])ai(?![a-z])", lowered)) or "人工智能" in text or "智能体" in text
     return ai_context and has_any(text, GENERIC_TOOL_KEYWORDS)
+
+
+def has_education_material(text: str) -> bool:
+    return has_any(text, EDUCATION_KEYWORDS)
+
+
+def has_edu_agent_material(text: str) -> bool:
+    return has_any(text, EDU_AGENT_KEYWORDS)
 
 
 def strip_management_sections(body: str) -> str:
@@ -395,6 +465,10 @@ def summarize_value(note: InboxNote, text: str, destinations: list[str]) -> str:
         return "与 Codex 工作流、提示词或自动化直接相关，适合先进入 `75_提示词库/Codex工作流/`，再反哺个人数据资产系统。"
     if has_destination(destinations, PROMPT_VISUAL_DESTINATION):
         return "包含可复用的视觉约束或界面生成经验，适合沉淀到 `75_提示词库/前端与视觉/`。"
+    if has_destination(destinations, KNOWLEDGE_EDUCATION_DESTINATION):
+        if has_destination(destinations, EDU_AGENT_PROJECT_DESTINATION):
+            return "属于教育与学习素材，且直接关联教育 AI、测评或题目处理能力，适合先进入 `20_资料库/教育与学习/` 并关联 `10_项目/edu-agent/`。"
+        return "属于教育与学习素材，适合先进入 `20_资料库/教育与学习/`，再判断是否需要提炼为项目假设或原子笔记。"
     if has_destination(destinations, SIGNAL_DESTINATION):
         return "包含 AI 产业、公司、模型或技术趋势信息，适合作为行业信号和资料库素材。"
     if has_destination(destinations, KNOWLEDGE_MANAGEMENT_DESTINATION):
@@ -420,6 +494,10 @@ def suggest_next_step(note: InboxNote, destinations: list[str], risks: list[str]
         return f"先把《{title}》中的录入或入箱方法整理到 `75_提示词库/收集与录入/`，再判断是否需要回写项目流程。"
     if has_destination(destinations, PROMPT_DISTILL_DESTINATION):
         return f"先把《{title}》中的萃取或整理方法整理到 `75_提示词库/萃取与整理/`，再判断是否需要扩展到项目流程。"
+    if has_destination(destinations, KNOWLEDGE_EDUCATION_DESTINATION):
+        if has_destination(destinations, EDU_AGENT_PROJECT_DESTINATION):
+            return f"先整理《{title}》的教育场景、教学或测评证据到 `20_资料库/教育与学习/`，再把可验证的产品影响关联到 `10_项目/edu-agent/`。"
+        return f"先整理《{title}》的教学、学习、课程或测评证据到 `20_资料库/教育与学习/`，确认长期可复用后再决定是否拆成原子笔记。"
     if has_destination(destinations, SIGNAL_DESTINATION):
         return f"先整理《{title}》的来源、关键事实和可验证判断，放入 `20_资料库/人工智能产业/`；涉及趋势判断的部分再进入对应的行业情报子目录或候选洞察。"
     if has_destination(destinations, KNOWLEDGE_MANAGEMENT_DESTINATION):
@@ -490,6 +568,12 @@ def triage_note(note: InboxNote) -> TriageResult:
         score += 2
     signal_material = has_signal_material(text)
 
+    if has_education_material(text):
+        destinations.append(KNOWLEDGE_EDUCATION_DESTINATION)
+        score += 2
+        if has_edu_agent_material(text):
+            destinations.append(EDU_AGENT_PROJECT_DESTINATION)
+            score += 1
     if has_any(text, MANAGEMENT_KEYWORDS):
         destinations.extend([KNOWLEDGE_MANAGEMENT_DESTINATION, ATOMIC_DESTINATION])
         score += 2

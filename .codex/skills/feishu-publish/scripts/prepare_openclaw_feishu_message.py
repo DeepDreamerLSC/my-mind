@@ -219,7 +219,7 @@ def prepare_today_action_message(args: argparse.Namespace, action_path: Path, st
     return 0
 
 
-def mark_push_published(push_path: Path, state_path: Path) -> bool:
+def mark_push_published(push_path: Path, state_path: Path, *, published_kind: str = "feishu_bundle") -> bool:
     if not state_path.exists():
         return False
     state = delivery.load_state(state_path)
@@ -228,7 +228,13 @@ def mark_push_published(push_path: Path, state_path: Path) -> bool:
     eligible = [source for source in sources if isinstance(items.get(source), dict) and items[source].get("delivery_stage") in {"prepared", "published", "sent", "feedback_received", "applied"}]
     if not eligible:
         return False
-    changed = delivery.mark_published(state, eligible, push_file=repo_relative(push_path), at=now_iso())
+    changed = delivery.mark_published(
+        state,
+        eligible,
+        push_file=repo_relative(push_path),
+        at=now_iso(),
+        published_kind=published_kind,
+    )
     if changed:
         delivery.save_state(state_path, state)
     return changed
@@ -286,6 +292,8 @@ def build_message_args(args: argparse.Namespace, push_file: str) -> list[str]:
 def publish_args(args: argparse.Namespace, push_file: str, *, dry_run: bool) -> list[str]:
     command = [str(PUBLISH_SCRIPT), "--push-file", push_file]
     command.append("--dry-run" if dry_run else "--publish")
+    if args.publish_title:
+        command.extend(["--title", args.publish_title])
     if args.force:
         command.append("--force")
     if args.publish_max_items > 0:
@@ -327,6 +335,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-publish", action="store_true", help="Only build the message; fail if no published bundle exists.")
     parser.add_argument("--dry-run", action="store_true", help="Preview the publish step when no matching bundle exists; do not publish.")
     parser.add_argument("--force", action="store_true", help="Force publish instead of reusing/updating existing records.")
+    parser.add_argument("--publish-title", default="", help="Optional Feishu bundle title for this push file.")
     parser.add_argument("--publish-max-items", type=int, default=0, help="Maximum items to publish. 0 means all.")
     parser.add_argument("--message-max-items", type=int, default=3, help="Maximum item highlights in OpenClaw message.")
     parser.add_argument("--summary-chars", type=int, default=90, help="Maximum summary characters per highlighted item.")

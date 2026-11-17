@@ -25,7 +25,7 @@ DEFAULT_SOURCES = Path(__file__).resolve().parents[1] / "references" / "sources.
 DEFAULT_INBOX = ROOT / "00_收件箱"
 DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 
-CATEGORIES = ["AI与Agent工具", "工作流与知识系统", "商业", "管理"]
+CATEGORIES = ["AI与Agent工具", "工作流与知识系统", "商业", "管理", "教育与学习"]
 
 CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "AI与Agent工具": [
@@ -130,6 +130,35 @@ CATEGORY_KEYWORDS: dict[str, list[str]] = {
         "performance",
         "process",
     ],
+    "教育与学习": [
+        "education",
+        "educational",
+        "edtech",
+        "educator",
+        "teacher",
+        "teaching",
+        "classroom",
+        "curriculum",
+        "pedagogy",
+        "learning science",
+        "instructional design",
+        "formative assessment",
+        "student learning",
+        "school",
+        "k-12",
+        "higher education",
+        "tutoring",
+        "tutor",
+        "learning analytics",
+        "academic integrity",
+        "test prep",
+        "homework",
+        "essay feedback",
+        "question bank",
+        "item bank",
+        "adaptive learning",
+        "personalized learning",
+    ],
 }
 
 CHINESE_HINTS: dict[str, list[str]] = {
@@ -137,6 +166,33 @@ CHINESE_HINTS: dict[str, list[str]] = {
     "工作流与知识系统": ["工作流", "知识管理", "个人知识库", "笔记", "记忆", "检索", "收件箱", "生产力", "效率", "阅读", "书签"],
     "商业": ["商业模式", "战略", "增长", "定价", "市场", "竞争", "平台", "生态", "商业化", "产品策略", "创业", "融资", "产品", "公司"],
     "管理": ["管理", "领导力", "组织", "团队", "人才", "招聘", "决策", "执行", "文化", "流程", "工程管理", "技术管理", "组织建设"],
+    "教育与学习": [
+        "教育",
+        "教育科技",
+        "教育技术",
+        "教育 AI",
+        "教师",
+        "学生",
+        "课堂",
+        "课程",
+        "教学",
+        "学习科学",
+        "教学设计",
+        "教育测评",
+        "考试",
+        "错题",
+        "题库",
+        "学情",
+        "组卷",
+        "作文批改",
+        "智能辅导",
+        "个性化学习",
+        "自适应学习",
+        "学习分析",
+        "高校",
+        "K12",
+        "学术诚信",
+    ],
 }
 
 REJECT_KEYWORDS = [
@@ -302,10 +358,12 @@ def render_inventory_gate_skip(gate: dict[str, object]) -> str:
 
 
 def clean_text(value: str, limit: int = 1200) -> str:
-    value = html.unescape(value or "")
+    value = value or ""
     value = re.sub(r"(?is)<(script|style).*?</\1>", " ", value)
     value = re.sub(r"(?is)<br\s*/?>", "\n", value)
     value = re.sub(r"(?is)</(p|div|li|h[1-6])>", "\n", value)
+    value = re.sub(r"(?is)<[^>]+>", " ", value)
+    value = html.unescape(value)
     value = re.sub(r"(?is)<[^>]+>", " ", value)
     value = re.sub(r"[ \t]+", " ", value)
     value = re.sub(r"\n{3,}", "\n\n", value)
@@ -648,6 +706,8 @@ def existing_urls(inbox: Path) -> set[str]:
 
 
 def suggested_destination(categories: list[str]) -> str:
+    if "教育与学习" in categories:
+        return "`20_资料库/教育与学习/`；涉及教育 AI、测评、错题、OCR 或组卷时关联 `10_项目/edu-agent/`"
     if "工作流与知识系统" in categories:
         return "`20_资料库/工作流与自动化/`、`75_提示词库/Codex工作流/` 或 `10_项目/个人数据资产系统/`"
     if "AI与Agent工具" in categories:
@@ -661,6 +721,10 @@ def suggested_destination(categories: list[str]) -> str:
 
 def value_reason(item: FeedItem) -> str:
     categories = "、".join(item.categories) if item.categories else "未分类"
+    if "教育与学习" in item.categories:
+        if "AI与Agent工具" in item.categories:
+            return f"命中 {categories}，可作为教育 AI、教学设计或测评能力的素材，优先判断是否影响 edu-agent。"
+        return f"命中 {categories}，适合作为教学实践、学习科学、课程或教育测评的资料库素材。"
     if "AI与Agent工具" in item.categories or "工作流与知识系统" in item.categories:
         return f"命中 {categories}，可能影响 Codex/OpenClaw/知识库自动化的后续设计。"
     if "商业" in item.categories:
@@ -818,7 +882,13 @@ def render_inbox_note(item: FeedItem) -> str:
     ]
     if "AI与Agent工具" in categories or "工作流与知识系统" in categories:
         lines.append("  - 个人数据资产系统")
-    lines.extend(["关联领域: []", "主题:"])
+    if "教育与学习" in categories:
+        lines.append("  - edu-agent")
+    if "教育与学习" in categories:
+        lines.extend(["关联领域:", "  - 教育与学习"])
+    else:
+        lines.append("关联领域: []")
+    lines.append("主题:")
     for category in categories:
         lines.append(f"  - {category}")
     lines.extend(["标签:"])

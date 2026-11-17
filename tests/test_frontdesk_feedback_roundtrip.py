@@ -91,6 +91,108 @@ class FrontdeskFeedbackRoundtripTest(unittest.TestCase):
             self.assertEqual("00_收件箱/redacted-source.md", record["来源文件"])
             self.assertEqual("75_提示词库/redacted-candidate.md", record["候选文件"])
 
+    def test_reading_reply_prefers_fixed_daily_backlog_pack(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run"
+            dashboard = run_dir / "后台总览"
+            dashboard.mkdir(parents=True)
+            (dashboard / "今日动作.md").write_text(
+                "# 今日动作\n\n### 1. Confirmation\n\n- 来源文件：`00_收件箱/confirmation.md`\n",
+                encoding="utf-8",
+            )
+            (dashboard / "今日未读清仓包.md").write_text(
+                "# my-mind 前台推送\n\n### 1. Backlog item\n\n- 来源文件：`00_收件箱/backlog.md`\n",
+                encoding="utf-8",
+            )
+
+            completed = run_command(str(APPEND), "1 已读", "--run-dir", str(run_dir), "--dry-run")
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            record = json.loads(completed.stdout)
+            self.assertEqual("00_收件箱/backlog.md", record["来源文件"])
+            self.assertTrue(record["推送文件"].endswith("后台总览/今日未读清仓包.md"))
+
+    def test_reading_reply_prefers_sent_backlog_snapshot_over_replaced_fixed_pack(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir) / "run"
+            dashboard = run_dir / "后台总览"
+            archive = dashboard / "未读清仓历史/未读清仓包-2026-07-16.md"
+            archive.parent.mkdir(parents=True)
+            archive.write_text(
+                "# my-mind 前台推送\n\n### 1. Sent backlog item\n\n- 来源文件：`00_收件箱/sent-backlog.md`\n",
+                encoding="utf-8",
+            )
+            (dashboard / "今日未读清仓包.md").write_text(
+                "# my-mind 前台推送\n\n### 1. Replacement item\n\n- 来源文件：`00_收件箱/replacement.md`\n",
+                encoding="utf-8",
+            )
+            (dashboard / "今日未读清仓包最近发送.json").write_text(
+                json.dumps({"archive_file": str(archive)}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            completed = run_command(str(APPEND), "1 已读", "--run-dir", str(run_dir), "--dry-run")
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            record = json.loads(completed.stdout)
+            self.assertEqual("00_收件箱/sent-backlog.md", record["来源文件"])
+            self.assertTrue(record["推送文件"].endswith("未读清仓历史/未读清仓包-2026-07-16.md"))
+
+    def test_backlog_pack_requeues_stalled_published_items_with_a_cap(self) -> None:
+        delivery = load_delivery()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            inbox = root / "inbox"
+            flow = root / "flow"
+            run_dir = root / "run"
+            project = root / "project"
+            state_path = run_dir / "state.json"
+            pack_path = run_dir / "后台总览/今日未读清仓包.md"
+            inbox.mkdir()
+            flow.mkdir()
+            project.mkdir()
+            sources: list[str] = []
+            for index in range(3):
+                source_path = inbox / f"backlog-{index}.md"
+                source_path.write_text(
+                    f"---\n标题: Backlog {index}\n解析状态: 已解析\n内容质量: 可推送\n阅读状态: 未读\n处理状态: 已分拣\n---\n\n# Backlog {index}\n\nFixture content.\n",
+                    encoding="utf-8",
+                )
+                sources.append(source_path.as_posix())
+            state = delivery.empty_state()
+            old_at = "2026-07-01T08:00:00+08:00"
+            delivery.mark_prepared(state, [{"source_file": source} for source in sources], push_file="old.md", at=old_at)
+            delivery.mark_published(state, sources, push_file="old.md", at=old_at)
+            delivery.save_state(state_path, state)
+
+            completed = run_command(
+                str(GENERATE),
+                "--inbox",
+                str(inbox),
+                "--flow-dir",
+                str(flow),
+                "--run-dir",
+                str(run_dir),
+                "--project-dir",
+                str(project),
+                "--state-file",
+                str(state_path),
+                "--ignore-flow",
+                "--limit",
+                "2",
+                "--output-file",
+                str(pack_path),
+                "--requeue-published-after-hours",
+                "24",
+            )
+
+            self.assertEqual(0, completed.returncode, completed.stderr)
+            self.assertEqual(pack_path, Path(completed.stdout.strip()))
+            cards = [line for line in pack_path.read_text(encoding="utf-8").splitlines() if line.startswith("### ")]
+            self.assertEqual(2, len(cards))
+            final_state = delivery.load_state(state_path)
+            self.assertTrue(all(final_state["items"][source]["delivery_stage"] == "prepared" for source in sources))
+
     def test_corrupt_state_prevents_partial_feedback_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

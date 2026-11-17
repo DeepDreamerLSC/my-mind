@@ -180,6 +180,27 @@ class FrontdeskDeliveryStateTest(unittest.TestCase):
         self.assertEqual("unknown", state["items"][source]["legacy_delivery"])
         self.assertIn("legacy_feedback_received_at", state["items"][source])
 
+    def test_stalled_published_items_require_explicit_requeue(self) -> None:
+        delivery = load_module(DELIVERY_LIB, "test_frontdesk_delivery_requeue")
+        source = "00_收件箱/redacted-stalled.md"
+        state = delivery.empty_state()
+        published_at = "2026-07-01T08:00:00+08:00"
+        delivery.mark_prepared(state, [{"source_file": source}], push_file="redacted.md", at=published_at)
+        delivery.mark_published(state, [source], push_file="redacted.md", at=published_at)
+
+        requeued = delivery.requeue_stalled_published(
+            state,
+            at="2026-07-03T08:00:00+08:00",
+            min_age_hours=24,
+        )
+
+        self.assertEqual([source], requeued)
+        item = state["items"][source]
+        self.assertEqual("prepared", item["delivery_stage"])
+        self.assertEqual(published_at, item["prepared_at"])
+        self.assertEqual("published_without_send_receipt", item["requeue_reason"])
+        self.assertEqual([], delivery.requeue_stalled_published(state, at="2026-07-04T08:00:00+08:00", min_age_hours=24))
+
     def test_send_ack_requires_channel_and_external_evidence(self) -> None:
         delivery = load_module(DELIVERY_LIB, "test_frontdesk_delivery_requirements")
         source = "00_收件箱/redacted-review-note.md"

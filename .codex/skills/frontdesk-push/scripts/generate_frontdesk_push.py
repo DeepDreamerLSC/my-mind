@@ -45,6 +45,36 @@ HIGH_KEYWORDS = [
     "沉淀",
 ]
 MEDIUM_KEYWORDS = ["人工智能", "ai", "管理", "项目", "知识", "复盘", "资料库", "原子笔记"]
+EDUCATION_KEYWORDS = [
+    "教育",
+    "教育科技",
+    "教育技术",
+    "教育ai",
+    "edtech",
+    "education",
+    "educational",
+    "teacher",
+    "educator",
+    "classroom",
+    "curriculum",
+    "pedagogy",
+    "learning science",
+    "tutoring",
+    "教师",
+    "学生",
+    "课堂",
+    "课程",
+    "教学",
+    "学习科学",
+    "教育测评",
+    "考试",
+    "错题",
+    "题库",
+    "组卷",
+    "智能辅导",
+    "自适应学习",
+    "学术诚信",
+]
 TERMINAL_STATUSES = {"已处理", "已晋升", "可丢弃", "已归档"}
 LOW_QUALITY_STATUSES = {"需继续解析", "需核验"}
 PROMOTED_STATUSES = {"正式", "已处理"}
@@ -454,13 +484,20 @@ def note_score(meta: dict[str, str], body: str) -> int:
         score += 10
     score += sum(12 for keyword in HIGH_KEYWORDS if keyword in text)
     score += sum(5 for keyword in MEDIUM_KEYWORDS if keyword in text)
+    score += sum(5 for keyword in EDUCATION_KEYWORDS if keyword in text)
     return score
+
+
+def has_education_material(text: str) -> bool:
+    return any(keyword in text.lower() for keyword in EDUCATION_KEYWORDS)
 
 
 def note_value(meta: dict[str, str], body: str) -> str:
     text = f"{meta.get('标题', '')}\n{body[:3000]}".lower()
     if meta.get("阅读状态") in {"已读", "已阅读"}:
         return "这是用户主动入箱且已读过的资料，适合优先判断是否继续沉淀，而不是再次提醒阅读。"
+    if has_education_material(text):
+        return "属于教育与学习素材，优先判断其对教学、学习、测评或 edu-agent 的实际影响。"
     if any(keyword in text for keyword in ["codex", "openai", "skill", "prompt", "提示词", "agent", "工作流"]):
         return "和 Codex、提示词、skill 或自动化直接相关，适合优先阅读并判断是否沉淀。"
     if meta.get("图片OCR字数"):
@@ -487,6 +524,8 @@ def note_action(meta: dict[str, str], body: str) -> str:
 
 def distill_direction(meta: dict[str, str], body: str) -> str:
     text = f"{meta.get('标题', '')}\n{body[:3000]}".lower()
+    if has_education_material(text):
+        return "`20_资料库/教育与学习/`；涉及教育 AI、测评、错题、OCR 或组卷时同步关联 `10_项目/edu-agent/`。"
     if any(keyword in text for keyword in ["codex", "openai", "skill", "prompt", "提示词", "agent", "工作流"]):
         return "`75_提示词库/Codex工作流/` 或 `10_项目/个人数据资产系统/`，优先判断是否能沉淀成可复用工作流。"
     if any(keyword in text for keyword in ["视觉", "高级感", "排版", "配色"]) or re.search(r"\b(html|ppt)\b", text):
@@ -752,6 +791,13 @@ def unique_path(directory: Path, filename: str) -> Path:
         index += 1
 
 
+def resolve_output_path(value: str, run_dir: Path) -> Path:
+    if not value:
+        return unique_path(run_dir, f"前台推送-{now_filename()}.md")
+    path = Path(value)
+    return path if path.is_absolute() else ROOT / path
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate a my-mind frontdesk push note for OpenClaw.")
     parser.add_argument("--inbox", default=str(DEFAULT_INBOX), help="Inbox directory.")
@@ -760,6 +806,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project-dir", default=str(DEFAULT_PROJECT_DIR), help="Project directory for progress summary.")
     parser.add_argument("--state-file", default=str(DEFAULT_PUSH_STATE), help="Push state JSON used for cooldown and feedback status.")
     parser.add_argument("--limit", type=int, default=0, help="Maximum pushed inbox items. Use 0 to include all candidates.")
+    parser.add_argument("--output-file", default="", help="Optional stable Markdown path for a capped daily reading pack.")
+    parser.add_argument(
+        "--requeue-published-after-hours",
+        type=int,
+        default=0,
+        help="Explicitly requeue published items without a send receipt after this many hours. 0 disables recovery.",
+    )
     parser.add_argument("--excerpt-chars", type=int, default=1200, help="Maximum reading excerpt characters per item.")
     parser.add_argument("--cooldown-hours", type=int, default=24, help="Skip items pushed without feedback within this many hours. Use 0 to disable.")
     parser.add_argument("--include-low-quality", action="store_true", help="Include notes marked 内容质量=需继续解析 or 需核验.")
@@ -797,6 +850,12 @@ def main() -> int:
     state = delivery.empty_state() if args.no_state else load_push_state(state_file)
     if not args.no_state:
         apply_feedback_status_from_queue(state, run_dir)
+        if args.requeue_published_after_hours > 0:
+            delivery.requeue_stalled_published(
+                state,
+                at=now_iso(),
+                min_age_hours=args.requeue_published_after_hours,
+            )
     if args.no_state:
         eligible = all_notes
     else:
@@ -812,8 +871,8 @@ def main() -> int:
         print(note, end="")
         return 0
 
-    run_dir.mkdir(parents=True, exist_ok=True)
-    output_path = unique_path(run_dir, f"前台推送-{now_filename()}.md")
+    output_path = resolve_output_path(args.output_file, run_dir)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(note, encoding="utf-8")
     if not args.no_state:
         update_push_state(state, selected, output_path)

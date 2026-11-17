@@ -27,7 +27,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --view das
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --view openclaw
 ```
 
-预览唯一的日常用户入口：
+预览常规日常用户入口：
 
 ```bash
 python3 .codex/skills/backend-control/scripts/backend_health_check.py --view today
@@ -58,7 +58,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --write-di
 - `85_运行记录/后台总览/OpenClaw待提醒.md`：兼容镜像，内容与“今日动作”一致，不是第二套动作来源。
 - `85_运行记录/后台总览/飞书仪表盘数据.json`：供飞书多维表格同步的结构化数据。
 - `85_运行记录/后台总览/飞书仪表盘数据/*.csv`：按表拆分的 CSV 数据。
-- `85_运行记录/后台总览/今日动作.json` 与 `今日动作.md`：同一动作类型、来源去重、最多 3 项的唯一日常入口。
+- `85_运行记录/后台总览/今日动作.json` 与 `今日动作.md`：同一动作类型、来源去重、最多 3 项的常规日常入口。
 
 只导出飞书仪表盘数据。结构化导出属于诊断写入，必须显式授权：
 
@@ -101,7 +101,7 @@ python3 .codex/skills/backend-control/scripts/backend_health_check.py --format j
 - 不删除文件，不改收件箱，不生成候选沉淀。
 - 若发现待处理反馈，建议优先运行 `frontdesk-feedback` 的消费脚本。
 - 若发现低质量解析，不建议进入前台推送。
-- OpenClaw 只读取“今日动作”；`OpenClaw待提醒.md` 仅为兼容镜像，不再单独生成另一组提醒。
+- OpenClaw 的常规提醒只读取“今日动作”；用户明确启用清仓时，额外读取固定的 `今日未读清仓包.md`，不得改读最新推送或 `OpenClaw待提醒.md`。
 - 若已推送未反馈较多但反馈队列为空，明确标记“脚本生成不等于已触达”，提醒 OpenClaw 观察真实发送。
 - 若决策审视或代码质量审视出现高/红色风险，把它放入 Codex 后台应处理事项，必要时交给 OpenClaw 提醒用户确认。
 - 飞书仪表盘同步只读取结构化数据文件，不重复扫描仓库事实源。

@@ -25,6 +25,8 @@ DEFAULT_RUN_DIR = ROOT / "85_运行记录"
 QUEUE_NAME = "前台反馈队列.jsonl"
 CONFIRM_QUEUE_MD = ROOT / "05_流转区/50_待确认/待确认队列.md"
 TODAY_ACTION_MD = DEFAULT_RUN_DIR / "后台总览/今日动作.md"
+DAILY_BACKLOG_PACK_NAME = "今日未读清仓包.md"
+DAILY_BACKLOG_SENT_RECORD_NAME = "今日未读清仓包最近发送.json"
 
 
 ACTION_ALIASES = [
@@ -52,6 +54,7 @@ ACTION_ALIASES = [
 ]
 
 CONFIRM_ACTIONS = {"确认转正", "继续核验", "调整分类"}
+READING_ACTIONS = {"已读", "沉淀", "继续解析", "补充想法"}
 
 
 def now_datetime() -> str:
@@ -63,7 +66,34 @@ def latest_push_file(run_dir: Path) -> Path | None:
     return files[0] if files else None
 
 
-def default_context_file(run_dir: Path, action: str) -> Path | None:
+def latest_sent_backlog_pack(run_dir: Path) -> Path | None:
+    record_path = run_dir / "后台总览" / DAILY_BACKLOG_SENT_RECORD_NAME
+    if not record_path.exists():
+        return None
+    try:
+        payload = json.loads(record_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    value = str(payload.get("archive_file") or "").strip()
+    if not value:
+        return None
+    path = Path(value)
+    if not path.is_absolute():
+        path = ROOT / path
+    return path if path.exists() else None
+
+
+def default_context_file(run_dir: Path, action: str, reply: str = "") -> Path | None:
+    backlog_pack = run_dir / "后台总览" / DAILY_BACKLOG_PACK_NAME
+    sent_backlog_pack = latest_sent_backlog_pack(run_dir)
+    batch_reply = bool(re.search(r"(?:前\s*\d+|\d+\s*条|全部|所有)", reply))
+    if action in READING_ACTIONS or (action == "跳过" and batch_reply):
+        if sent_backlog_pack:
+            return sent_backlog_pack
+        if backlog_pack.exists():
+            return backlog_pack
     today_action = run_dir / "后台总览/今日动作.md"
     if today_action.exists():
         return today_action
@@ -180,7 +210,7 @@ def main() -> int:
     if not state_path.is_absolute():
         state_path = ROOT / state_path
     target, action, target_type, content = parse_reply(args.reply)
-    push_path = Path(args.push_file) if args.push_file else default_context_file(run_dir, action)
+    push_path = Path(args.push_file) if args.push_file else default_context_file(run_dir, action, args.reply)
     if push_path and not push_path.is_absolute():
         push_path = ROOT / push_path
 

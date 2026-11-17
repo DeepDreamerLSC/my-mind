@@ -13,7 +13,7 @@ First version:
 
 - Accept one or more links.
 - Detect platform from URL and `yt-dlp` extractor metadata when available.
-- Collect basic information: title, author/channel, author ID, content ID, publish date, duration, platform, original URL, description/copy excerpt, tags, categories, thumbnail, interaction counts, subtitle availability, parse status, failure reason.
+- Collect basic information: title, author/channel, author ID, content ID, publish date, duration, platform, original URL, description/copy excerpt, tags, categories, thumbnail, original image URLs, available video stream URL, interaction counts, subtitle availability, parse status, failure reason.
 - For YouTube links, inspect the public watch page for external transcript links. If a Lex Fridman official transcript page is found, extract transcript source metadata, chapter list, segment count, and estimated word count without copying the full transcript.
 - When `yt-dlp` exposes YouTube subtitle URLs, fetch and parse the selected subtitle track to collect source, language, format, segment count, and estimated word count. Do not write subtitle text into the note by default.
 - For public 抖音 share links, resolve the short link and parse the mobile public page for title/copy, author, publish date, duration, cover, public media URL, content ID, and interaction counts when available.
@@ -31,7 +31,7 @@ Out of scope for first version:
 - Copying subtitle text or lyrics into the repository by default.
 - Promoting content into `20_资料库/`, `30_原子笔记/`, or `65_洞察/`.
 - Logging into platforms or using cookies.
-- Bypassing platform access controls, crawling comments, or downloading media files.
+- Bypassing platform access controls, crawling comments, or retaining downloaded media files. The Feishu publishing flow may create a bounded, temporary source-image or video-frame cache for reading-page visuals; it never stores full videos or generated images.
 
 ## Workflow
 

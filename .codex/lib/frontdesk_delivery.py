@@ -88,6 +88,45 @@ def _touch(state: dict[str, Any], at: str) -> None:
     state["updated_at"] = at
 
 
+def requeue_stalled_published(
+    state: dict[str, Any],
+    *,
+    at: str,
+    min_age_hours: int,
+) -> list[str]:
+    """Return published items without send evidence to the prepared queue."""
+    if min_age_hours < 0:
+        raise ValueError("Requeue age must not be negative")
+    try:
+        requeue_at = dt.datetime.fromisoformat(at)
+    except ValueError as exc:
+        raise ValueError("A requeue requires an ISO-8601 timestamp") from exc
+    if requeue_at.tzinfo is None:
+        raise ValueError("A requeue timestamp requires a timezone")
+    cutoff = requeue_at - dt.timedelta(hours=min_age_hours)
+
+    requeued: list[str] = []
+    for source, item in _items(state).items():
+        if not isinstance(item, dict) or _stage(item) != "published" or item.get("sent_at"):
+            continue
+        published_at = str(item.get("published_at") or "")
+        try:
+            published_time = dt.datetime.fromisoformat(published_at)
+        except ValueError:
+            continue
+        if published_time.tzinfo is None or published_time > cutoff:
+            continue
+        item["delivery_stage"] = "prepared"
+        item.setdefault("prepared_at", published_at)
+        item["requeued_at"] = at
+        item["requeue_reason"] = "published_without_send_receipt"
+        item["requeue_count"] = int(item.get("requeue_count") or 0) + 1
+        requeued.append(source)
+    if requeued:
+        _touch(state, at)
+    return requeued
+
+
 def mark_prepared(
     state: dict[str, Any],
     entries: Iterable[dict[str, Any]],
@@ -132,7 +171,11 @@ def mark_published(
     *,
     push_file: str,
     at: str,
+    published_kind: str = "feishu_bundle",
 ) -> bool:
+    published_kind = published_kind.strip()
+    if not published_kind:
+        raise ValueError("A published delivery requires a kind")
     items = _items(state)
     sources = [str(source).strip() for source in source_files if str(source).strip()]
     for source in sources:
@@ -149,6 +192,7 @@ def mark_published(
                 "delivery_stage": "published",
                 "published_at": at,
                 "published_push_file": push_file,
+                "published_kind": published_kind,
             }
         )
         changed = True

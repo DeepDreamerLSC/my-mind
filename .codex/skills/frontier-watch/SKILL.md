@@ -1,16 +1,17 @@
 ---
 name: frontier-watch
-description: Run curated frontier intelligence checks for my-mind across AI/agent tools, workflow and knowledge systems, business, and management. Use when the user asks to 巡检前沿信息, 获取前沿情报, frontier watch, 浏览有用资讯入箱, or monitor useful external signals. Produces 85_运行记录/前沿情报巡检-*.md and only writes 00_收件箱 when explicitly requested.
+description: Run curated frontier intelligence checks for my-mind across AI/agent tools, workflow and knowledge systems, business, management, and education. Use when the user asks to 巡检前沿信息, 获取前沿情报, frontier watch, 浏览有用资讯入箱, or monitor useful external signals. Produces 85_运行记录/前沿情报巡检-*.md and only writes 00_收件箱 when explicitly requested.
 ---
 
 # 前沿情报巡检
 
-从高质量来源筛选对 `my-mind` 有用的外部信号，覆盖四类：
+从高质量来源筛选对 `my-mind` 有用的外部信号，覆盖五类：
 
 - `AI与Agent工具`
 - `工作流与知识系统`
 - `商业`
 - `管理`
+- `教育与学习`
 
 默认只生成巡检报告，不入箱；只有用户明确要求或命令显式加 `--write-inbox` 时，才把入选项写入 `00_收件箱/`。
 

@@ -98,6 +98,22 @@ def trim(text: object, max_chars: int) -> str:
     return value[: max_chars - 1].rstrip() + "…"
 
 
+def normalized_compare_text(value: object) -> str:
+    return re.sub(r"[\W_]+", "", str(value or "").casefold())
+
+
+def item_brief(item: dict[str, object], title: str, summary_chars: int) -> str:
+    for key in ("reading_brief", "brief", "summary"):
+        candidate = trim(item.get(key), summary_chars)
+        if not candidate:
+            continue
+        normalized_candidate = normalized_compare_text(candidate)
+        normalized_title = normalized_compare_text(title)
+        if normalized_candidate and normalized_candidate != normalized_title:
+            return candidate
+    return ""
+
+
 def section_between(text: str, heading: str) -> str:
     marker = f"## {heading}"
     start = text.find(marker)
@@ -194,16 +210,16 @@ def item_lines(record: dict[str, object], max_items: int, summary_chars: int) ->
             continue
         index = item.get("index") or "?"
         title = trim(item.get("title"), 80)
-        summary = trim(item.get("summary"), summary_chars)
+        brief = item_brief(item, title, summary_chars)
         item_url = str(item.get("wiki_url") or item.get("feishu_url") or "").strip()
         if not title:
             continue
+        item_lines = [f"{index}. {title}"]
+        if brief:
+            item_lines.append(f"   简述：{brief}")
         if item_url:
-            title = f"{title}\n   {item_url}"
-        if summary:
-            lines.append(f"{index}. {title}\n   {summary}")
-        else:
-            lines.append(f"{index}. {title}")
+            item_lines.append(f"   飞书：{item_url}")
+        lines.append("\n".join(item_lines))
     return lines
 
 

@@ -298,5 +298,17 @@
     "url": "https://www.qbitai.com/feed",
     "category_hints": ["AI与Agent工具"],
     "quality": 3
+  },
+  {
+    "name": "EdSurge",
+    "url": "https://www.edsurge.com/articles_rss",
+    "category_hints": ["教育与学习"],
+    "quality": 4
+  },
+  {
+    "name": "The Hechinger Report",
+    "url": "https://hechingerreport.org/feed/",
+    "category_hints": ["教育与学习"],
+    "quality": 4
   }
 ]
