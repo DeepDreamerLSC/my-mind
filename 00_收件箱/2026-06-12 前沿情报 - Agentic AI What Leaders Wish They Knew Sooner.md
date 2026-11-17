@@ -93,6 +93,182 @@ As AI agents go beyond the hypothetical and enter actual workflows, many leaders
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+- 2026-09-29 07:13:54 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-28 07:14:34 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-27 07:14:50 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-25 07:13:53 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-24 07:14:43 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-23 16:18:10 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-22 07:14:45 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-21 07:14:58 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-20 07:13:36 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-19 07:14:49 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-18 07:13:59 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-17 07:13:26 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-16 07:14:47 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-15 07:13:48 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-14 10:45:05 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-05 07:15:18 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-04 07:13:25 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-03 07:15:14 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-02 07:14:40 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-09-01 07:14:45 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-31 07:13:50 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-30 07:14:32 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-29 07:14:14 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-28 07:14:39 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-27 07:15:19 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-26 07:14:16 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-25 07:15:11 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-24 07:14:48 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-23 07:14:13 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-22 07:14:53 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-21 07:16:18 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-20 07:14:46 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-19 07:13:26 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-18 07:14:11 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-17 07:13:10 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-16 07:14:37 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-15 07:13:52 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-14 07:14:46 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-13 07:13:42 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-12 07:14:32 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-11 07:13:53 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-10 07:13:17 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-09 07:15:08 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-08 07:14:11 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-07 07:13:47 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-06 07:12:53 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-05 07:13:53 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-04 07:13:14 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-03 07:15:06 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-02 07:13:47 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-08-01 07:13:49 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-31 07:13:56 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-30 07:14:20 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-29 07:14:00 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-28 07:14:42 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-27 07:13:41 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-26 07:14:00 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-25 07:13:32 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-24 07:13:29 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-23 07:14:49 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-22 07:13:26 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-21 07:13:23 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-20 07:16:09 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-19 07:13:03 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-18 07:13:18 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-17 07:14:15 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-16 07:18:09 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-15 07:14:48 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-14 07:13:56 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-13 07:13:23 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-12 07:15:34 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-11 07:14:04 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-10 07:15:58 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-09 07:14:05 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-08 07:14:49 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-06 07:14:17 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-05 07:14:27 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-04 07:15:29 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-03 07:14:11 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-02 07:14:49 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-07-01 07:14:27 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-30 07:14:46 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-29 07:14:09 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-28 07:16:17 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-27 07:14:53 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-26 07:16:20 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-25 07:14:39 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
+- 2026-06-24 07:16:21 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 - 2026-06-23 07:13:42 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 - 2026-06-22 07:14:45 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
 - 2026-06-21 07:15:21 +0800：`parse-quality-repair` 仍需核验：来源仍是 RSS/Atom 摘要或截断摘录，需要补全文、字幕、OCR 或转写。
