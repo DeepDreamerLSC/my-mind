@@ -44,8 +44,8 @@ XHS_DESKTOP_HEADERS = {
     ),
     "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
 }
-TRANSCRIPT_SUMMARY_SENTENCE_COUNT = 12
-TRANSCRIPT_KEY_POINT_COUNT = 12
+TRANSCRIPT_SUMMARY_SENTENCE_COUNT = 5
+TRANSCRIPT_KEY_POINT_COUNT = 7
 TRANSCRIPT_TIMELINE_INTERVAL_SECONDS = 300
 DEFAULT_MAX_TRANSCRIBE_SECONDS = 360
 XHS_IMAGE_OCR_MAX_IMAGES = 3
@@ -2964,11 +2964,35 @@ def score_sentence(sentence: str, index: int) -> float:
         if keyword in lower:
             score += 2.0
     score += min(len(sentence), 120) / 60
-    if index < 8:
-        score += 1.2
-    elif index < 20:
-        score += 0.5
+    score += 0.2 if index < 8 else 0.0
     return score
+
+
+def complete_transcript_sentence(sentence: str) -> str:
+    value = re.sub(r"(?:\.{3,}|…+)\s*$", "", normalize_cjk_text(sentence)).rstrip("，,、；;：: ")
+    if value and value[-1] not in "。！？!?；;":
+        value += "。"
+    return value
+
+
+def bounded_transcript_summary(sentences: list[str], minimum: int = 100, maximum: int = 200) -> str:
+    selected = ""
+    for sentence in sentences:
+        complete = complete_transcript_sentence(sentence)
+        if selected and len(selected + complete) > maximum:
+            continue
+        selected += complete
+        if len(selected) >= minimum:
+            break
+    if len(selected) <= maximum:
+        return selected
+    clauses = re.split(r"(?<=[，,；;])", selected)
+    trimmed = ""
+    for clause in clauses:
+        if trimmed and len(trimmed + clause) > maximum - 1:
+            break
+        trimmed += clause
+    return complete_transcript_sentence(trimmed or selected[: maximum - 1])
 
 
 def summarize_transcript_text(text: str) -> dict[str, Any]:
@@ -2981,18 +3005,25 @@ def summarize_transcript_text(text: str) -> dict[str, Any]:
             "excerpt": normalized,
             "word_count": transcript_word_count(normalized),
         }
-    summary_sentences = sentences[:TRANSCRIPT_SUMMARY_SENTENCE_COUNT]
     scored = sorted(
         ((score_sentence(sentence, index), index, sentence) for index, sentence in enumerate(sentences)),
         reverse=True,
     )
+    window_count = min(TRANSCRIPT_SUMMARY_SENTENCE_COUNT, len(sentences))
+    window_winners: list[int] = []
+    for window in range(window_count):
+        start = round(window * len(sentences) / window_count)
+        end = max(start + 1, round((window + 1) * len(sentences) / window_count))
+        winner = max(range(start, min(end, len(sentences))), key=lambda index: score_sentence(sentences[index], index))
+        window_winners.append(winner)
+    summary_sentences = [sentences[index] for index in sorted(set(window_winners))]
     selected_indices = sorted({index for _, index, _ in scored[:TRANSCRIPT_KEY_POINT_COUNT]})
-    key_points = [sentences[index] for index in selected_indices]
-    if not key_points:
-        key_points = summary_sentences[:6]
+    key_points = [complete_transcript_sentence(sentences[index]) for index in selected_indices]
+    if len(key_points) < 3:
+        key_points = [complete_transcript_sentence(sentence) for sentence in summary_sentences]
     return {
-        "summary": " ".join(summary_sentences),
-        "key_points": key_points,
+        "summary": bounded_transcript_summary(summary_sentences),
+        "key_points": key_points[:TRANSCRIPT_KEY_POINT_COUNT],
         "excerpt": normalized,
         "word_count": transcript_word_count(normalized),
     }
@@ -3010,20 +3041,76 @@ def parse_time_to_seconds(value: str) -> int:
     return 0
 
 
+def transcript_segment_tokens(text: str) -> set[str]:
+    normalized = normalize_cjk_text(text).casefold()
+    tokens = set(re.findall(r"[a-z0-9][a-z0-9_+-]{1,}", normalized))
+    cjk = "".join(re.findall(r"[\u3400-\u9fff]", normalized))
+    tokens.update(cjk[index : index + 2] for index in range(max(0, len(cjk) - 1)))
+    return tokens
+
+
+def transcript_topic_shift(previous: str, current: str) -> bool:
+    if re.search(r"^(接下来|然后|下面|另外|最后|总结|首先|其次|第三|next|then|finally|first|second|third)\b", current, flags=re.I):
+        return True
+    left = transcript_segment_tokens(previous)
+    right = transcript_segment_tokens(current)
+    return bool(left and right and len(left & right) / len(left | right) < 0.04)
+
+
 def build_transcript_timeline(segments: list[dict[str, str]], interval_seconds: int = TRANSCRIPT_TIMELINE_INTERVAL_SECONDS) -> list[dict[str, str]]:
     if not segments:
         return []
-    buckets: dict[int, list[str]] = {}
+    normalized_segments: list[tuple[int, str]] = []
     for segment in segments:
         seconds = parse_time_to_seconds(segment.get("time", ""))
-        bucket = (seconds // interval_seconds) * interval_seconds
         text = normalize_cjk_text(segment.get("text", ""))
         if len(text) >= 8:
-            buckets.setdefault(bucket, []).append(text)
+            normalized_segments.append((seconds, text))
+    if not normalized_segments:
+        return []
+
+    duration = max(normalized_segments[-1][0] + 30, 1)
+    target_count = min(8, max(3, round(duration / 360)))
+    target_chars = max(180, sum(len(text) for _, text in normalized_segments) // target_count)
+    max_chapter_seconds = max(90, round(duration / target_count * 1.5))
+    chapters: list[list[tuple[int, str]]] = []
+    current: list[tuple[int, str]] = []
+    current_chars = 0
+    for seconds, text in normalized_segments:
+        elapsed = seconds - current[0][0] if current else 0
+        topic_shift = bool(current and transcript_topic_shift(current[-1][1], text))
+        should_split = bool(
+            current
+            and len(chapters) < target_count - 1
+            and (
+                (topic_shift and current_chars >= target_chars * 0.55)
+                or current_chars >= target_chars * 1.2
+                or elapsed >= max_chapter_seconds
+            )
+        )
+        if should_split:
+            chapters.append(current)
+            current = []
+            current_chars = 0
+        current.append((seconds, text))
+        current_chars += len(text)
+    if current:
+        chapters.append(current)
+
+    while len(chapters) < min(target_count, len(normalized_segments)):
+        split_index = max(range(len(chapters)), key=lambda index: len(chapters[index]))
+        chapter = chapters[split_index]
+        if len(chapter) < 2:
+            break
+        midpoint = len(chapter) // 2
+        chapters[split_index : split_index + 1] = [chapter[:midpoint], chapter[midpoint:]]
+
     timeline: list[dict[str, str]] = []
-    for bucket in sorted(buckets):
-        joined = " ".join(buckets[bucket])
-        timeline.append({"time": fmt_duration(bucket), "text": joined.replace("\n", " ")})
+    for index, chapter in enumerate(chapters):
+        start = chapter[0][0]
+        end = chapters[index + 1][0][0] if index + 1 < len(chapters) else duration
+        joined = " ".join(text for _, text in chapter).replace("\n", " ")
+        timeline.append({"time": fmt_duration(start), "end_time": fmt_duration(end), "text": joined})
     return timeline
 
 
@@ -4294,6 +4381,41 @@ def media_url_from_info(info: dict[str, Any]) -> str:
     return max(candidates, key=lambda item: item[0])[1]
 
 
+def video_media_url_from_info(info: dict[str, Any]) -> str:
+    """Prefer a stream with video frames; audio-only URLs are unsuitable for visual evidence."""
+
+    candidates: list[tuple[float, str]] = []
+
+    def add(value: Any, *, score: float = 0, vcodec: Any = "") -> None:
+        url = clean_url(value or "")
+        if not url:
+            return
+        codec = str(vcodec or "").lower()
+        if codec in {"", "none"}:
+            suffix = Path(urlparse(url).path).suffix.lower()
+            if suffix not in {".m3u8", ".m4v", ".mp4", ".webm", ".mov"}:
+                return
+        candidates.append((score, url))
+
+    add(info.get("video_url"), score=10_000, vcodec=info.get("vcodec"))
+    add(info.get("media_url"), score=9_000, vcodec=info.get("vcodec"))
+    for key in ("requested_downloads", "requested_formats", "formats"):
+        values = info.get(key)
+        values = values if isinstance(values, list) else [values]
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            vcodec = str(value.get("vcodec") or "").lower()
+            if vcodec in {"", "none"}:
+                continue
+            try:
+                score = float(value.get("height") or 0) * 10_000 + float(value.get("tbr") or 0)
+            except (TypeError, ValueError):
+                score = 0
+            add(value.get("url"), score=score, vcodec=vcodec)
+    return max(candidates, key=lambda item: item[0])[1] if candidates else ""
+
+
 def should_extract_content(info: dict[str, Any] | None, mode: str) -> bool:
     if not info or mode == "never":
         return False
@@ -4359,6 +4481,8 @@ def assess_content_quality(
             return "需核验", "视频转写字数偏少，可能只抓到片段；推送时只适合快速判断。"
 
     if image_ocr:
+        if intish(image_ocr.get("processed_count")) < intish(image_ocr.get("image_count")):
+            return "需继续解析", "图片尚未全部处理，不能视为完整图文解析。"
         errors = image_ocr.get("errors") if isinstance(image_ocr.get("errors"), list) else []
         if errors:
             return "需核验", "图片 OCR 已生成，但存在部分图片处理失败；沉淀前需要校对。"
@@ -4382,8 +4506,10 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
     webpage_url = first_non_empty(info, ["webpage_url", "original_url"]) or url
     publish_date = fmt_upload_date(first_non_empty(info, ["upload_date", "release_date", "timestamp"]))
     duration = fmt_duration(info.get("duration"))
-    description = excerpt(str(info.get("description") or ""))
+    description = str(info.get("description") or "").strip()
     thumbnail = first_non_empty(info, ["thumbnail"])
+    image_urls = [str(value) for value in info.get("image_urls", []) if str(value).strip()] if isinstance(info.get("image_urls"), list) else []
+    video_media_url = video_media_url_from_info(info)
     extractor = first_non_empty(info, ["extractor_key", "extractor"])
     parse_tool = first_non_empty(info, ["parse_tool"]) or ("yt-dlp" if shutil.which("yt-dlp") else "")
     content_id = first_non_empty(info, ["id", "display_id", "aweme_id", "note_id"])
@@ -4444,6 +4570,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
         yaml_field("内容编号", content_id),
         yaml_field("时长", duration),
         yaml_field("封面图", thumbnail),
+        yaml_field("视频媒体链接", video_media_url),
+        yaml_field("图片素材数", len(image_urls)),
         yaml_field("点赞数", like_count),
         yaml_field("评论数", comment_count),
         yaml_field("收藏数", collect_count),
@@ -4516,6 +4644,11 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
         body.extend(["", "## 平台信息", ""])
         for label, value in platform_lines:
             body.append(f"- {label}：{value}")
+
+    if image_urls:
+        body.extend(["", "## 原始图片素材", ""])
+        for index, image_url in enumerate(image_urls, start=1):
+            body.append(f"- 来源图片 {index}：{image_url}")
 
     if error:
         heading = "解析说明" if info else "解析失败原因"
