@@ -535,6 +535,273 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py \
   --write-inbox
 ```
 
+## 采集环境依赖
+
+抖音、小红书采集依赖两个本机自建服务和少量系统工具。以下步骤于 2026-11-17 在本机（macOS）验证；新环境按此步骤部署。上游仓库均未锁版本，如遇接口变化，以各上游仓库文档为准。设计稿原先写的单一 `collect.json` 已实际拆分为 `dtk.json` 与 `xhs.json` 两个凭据文件（避免并行写入冲突），本节按实际文件编写；按设计稿规划，它们将由 `.codex/skills/inbox-capture/scripts/dtk_client.py` 与 `xhs_client.py` 读取，当前 `env_check.py` 只检查文件存在性。
+
+| 依赖 | 用途 | 地址 / 位置 |
+| --- | --- | --- |
+| Docker Desktop + dtk compose | 抖音解析 / 下载 | `http://127.0.0.1:18600`，部署于 `~/.local/services/dtk` |
+| XHS-Downloader | 小红书解析 / 下载 | `http://127.0.0.1:18601`，部署于 `~/.local/services/xhs-downloader` |
+| ffmpeg / ffprobe | 抽音频、格式校验、抽帧 | brew 安装 |
+| `dtk.json` / `xhs.json` | 两个服务的本机凭据 | `~/.config/my-mind/`，不进仓库 |
+
+两个服务都不配开机自启，重启电脑后按「服务重启与凭据补办」小节手动拉起。
+
+### 前置工具
+
+```bash
+brew install --cask docker   # Docker Desktop，装完启动一次，等引擎就绪
+brew install uv              # XHS-Downloader 的依赖管理
+brew install ffmpeg          # 提供 ffmpeg / ffprobe
+```
+
+Docker Desktop 也可从 https://www.docker.com 下载安装；uv 也可用官方脚本 `curl -LsSf https://astral.sh/uv/install.sh | sh`。
+
+### dtk：抖音解析/下载服务
+
+先建部署目录再克隆：
+
+```bash
+mkdir -p ~/.local/services
+git clone https://github.com/Evil0ctal/Douyin_TikTok_Download_API ~/.local/services/dtk
+cd ~/.local/services/dtk
+```
+
+写根目录 `.env`（引导变量，密码全部现场随机生成；出处见上游 `documents/zh/02-installation.md`「首次安装」第 2 步）：
+
+```bash
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+REDIS_PASSWORD=$(openssl rand -hex 24)
+cat > .env <<EOF
+DTK_SECRET_KEY=$(openssl rand -base64 48)
+POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+REDIS_PASSWORD=${REDIS_PASSWORD}
+DTK_DATABASE_URL=postgresql+asyncpg://dtk:${POSTGRES_PASSWORD}@postgres:5432/dtk
+DTK_REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+EOF
+chmod 600 .env
+```
+
+部署机的 `.env` 实际包含 6 个变量：上面 5 个，再加启用浏览器铸造时的 `DTK_BROWSER_RPC_URL=http://browser-rpc:9000`（留空表示关闭抖音/TikTok 自动铸造，身份池只能手工导入，见 `documents/zh/03-configuration.md`）。完整引导变量清单见仓库根目录 `.env.example`（带注释），逐项说明见 `documents/zh/03-configuration.md`。
+
+再写端口覆写 `docker/.env`。机制：compose 文件里的端口发布行 `${DTK_BIND_HOST:-127.0.0.1}:${DTK_BIND_PORT:-8000}:8000` 做变量插值时，只读 compose 文件旁边的 `docker/.env`（或 shell 环境变量）；根目录 `.env` 是经 `env_file` 喂给容器内部的应用变量，管不到发布端口。默认 8000 常被其他服务占用，必须覆写在这里：
+
+```bash
+cat > docker/.env <<'EOF'
+DTK_BIND_HOST=127.0.0.1
+DTK_BIND_PORT=18600
+EOF
+```
+
+启动（仓库根目录没有 compose 文件，`-f` 必带；`--wait` 等全部服务健康后返回）：
+
+```bash
+docker compose -p dtk -f docker/compose.yml up -d --wait
+```
+
+初始化只做一次。先从 api 容器日志取 setup token（横幅形如 `http://127.0.0.1:8000/setup?token=…`，24 小时有效、五次输错作废；横幅里永远印 8000，打开时保留 `?token=` 部分，把主机端口换成 18600）：
+
+```bash
+docker compose -p dtk -f docker/compose.yml logs api \
+  | grep -oE 'http://[^ ]*/setup\?token=[A-Za-z0-9_-]+' | tail -1
+```
+
+两种初始化方式任选：
+
+- 浏览器向导：打开上一步的 `/setup?token=…` 地址，走四步向导（创建管理员 → 配置代理 → 铸造首个身份 → 冒烟测试），细节见 `documents/zh/01-quickstart.md` 第 6 步。
+- 直接调 API（`token`/`username`/`password` 三字段，定义见源码 `src/dtk/api/routes/schemas.py` 的 `SetupInit`）：
+
+```bash
+curl -X POST http://127.0.0.1:18600/api/setup/init \
+  -H 'Content-Type: application/json' \
+  -d '{"token": "your-setup-token", "username": "your-admin", "password": "your-password"}'
+```
+
+用户名 3-64 位（字母、数字、点、短横、下划线，不以标点开头），密码至少 8 位。账号建好后该端点永久返回 409。上游没有邮件找回密码，重置用 CLI：`docker compose -p dtk -f docker/compose.yml exec api dtk user passwd <name>`。
+
+创建带 `douyin:read` + `media:write` 权限的 API Key。控制台路径：浏览器打开 http://127.0.0.1:18600 用管理员账号登录 → 「访问控制」→「API Key」→「创建密钥」。或走 API，先登录换会话 cookie 再建 Key（请求格式见 `documents/zh/09-users-and-api-keys.md`）：
+
+```bash
+curl -X POST http://127.0.0.1:18600/api/v1/auth/login \
+  -H 'Content-Type: application/json' -c cookies.txt \
+  -d '{"username": "your-admin", "password": "your-password"}'
+```
+
+```bash
+curl -X POST http://127.0.0.1:18600/api/v1/admin/api-keys \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"name": "my-mind", "scopes": ["douyin:read", "media:write"], "rate_limit": null, "expires_at": null}'
+```
+
+Key 只在创建响应里返回一次，拿到后立即写入凭据文件。字段规则：`name` 1-128 字符；`rate_limit` 每分钟请求数或 `null` 沿用默认；`expires_at` ISO 时间戳或 `null` 永不过期。
+
+身份池：池里没有身份时，解析请求会返回 `503 IDENTITY_POOL_EXHAUSTED`。两种解法：
+
+- 自动铸造：`cd ~/.local/services/dtk && docker compose -p dtk -f docker/compose.yml --profile browser up -d --build`。browser 容器是一个无头浏览器 RPC 服务，通过模拟真实浏览器会话生成新的平台身份补充进池。
+- 手动导入：控制台「身份池」→「导入 cookie」，接受请求头原始文本、浏览器扩展导出的 JSON、Netscape 格式 `cookies.txt`、每行一个 `key=value`；User-Agent 填同一浏览器会话的值，保证指纹和 cookie 对得上。
+
+国内网络注意：Docker Hub 直连可能被 DNS 污染。dtk 只有 Postgres 和 Redis 两个第三方镜像需要拉取（主服务镜像本地构建），可用公共镜像源预拉再 retag，不要改 Docker Desktop 全局镜像配置：
+
+```bash
+docker pull docker.m.daocloud.io/library/redis:8-alpine
+docker tag docker.m.daocloud.io/library/redis:8-alpine redis:8-alpine
+docker pull docker.m.daocloud.io/timescale/timescaledb-ha:pg17
+docker tag docker.m.daocloud.io/timescale/timescaledb-ha:pg17 timescale/timescaledb-ha:pg17
+```
+
+1ms.run 同理把前缀换成 `docker.1ms.run`；ghcr.io 镜像用 `ghcr.nju.edu.cn`。
+
+凭据写入 `~/.config/my-mind/dtk.json`（先 `mkdir -p ~/.config/my-mind`）并 `chmod 600`，占位示例：
+
+```json
+{
+  "base_url": "http://127.0.0.1:18600",
+  "api_key": "your-dtk-api-key",
+  "admin_user": "your-admin-username",
+  "admin_password": "your-admin-password",
+  "secret_key_location": "~/.local/services/dtk/.env 的 DTK_SECRET_KEY（位置说明，不是密钥本身）",
+  "project": {
+    "compose_project": "dtk",
+    "compose_file": "~/.local/services/dtk/docker/compose.yml",
+    "env_file": "~/.local/services/dtk/.env",
+    "port_override_file": "~/.local/services/dtk/docker/.env"
+  },
+  "scopes": ["douyin:read", "media:write"],
+  "auth_header": "X-API-Key"
+}
+```
+
+`project` 是嵌套对象；`secret_key_location` 记录根目录 `.env` 里 `DTK_SECRET_KEY` 的位置说明，不是密钥本身。
+
+### XHS-Downloader：小红书解析/下载服务
+
+上游是 [JoeanAmier/XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader)，GPL-3.0 许可，只以独立进程运行，代码不进本仓库。
+
+```bash
+mkdir -p ~/.local/services
+git clone https://github.com/JoeanAmier/XHS-Downloader ~/.local/services/xhs-downloader
+cd ~/.local/services/xhs-downloader
+uv sync
+```
+
+端口：上游 API 模式硬编码 `0.0.0.0:5556`，不改上游代码。用仓库外启动器 `~/.local/services/run-xhs-api.py` 调它的 `main.api_server(host="127.0.0.1", port=18601)`，绑到本机回环地址。启动器完整内容如下（不含密钥；`REPO` 是本机绝对路径，新机器按部署路径改这一行）：
+
+```python
+"""Launcher for XHS-Downloader API server (GPL-3.0, JoeanAmier).
+
+Runs the upstream project's `main.api_server` coroutine as-is with custom
+host/port (upstream `python main.py api` hardcodes 0.0.0.0:5556).
+No upstream code is copied or modified; this file only imports and calls it.
+"""
+
+import sys
+from asyncio import run
+
+REPO = "/Users/linsuchang/.local/services/xhs-downloader"
+HOST = "127.0.0.1"
+PORT = 18601
+
+sys.path.insert(0, REPO)
+
+from main import api_server  # noqa: E402
+
+if __name__ == "__main__":
+    run(api_server(host=HOST, port=PORT))
+```
+
+Bearer token。前置条件：上游 `Volume/` 目录不随克隆带出（被其 `.gitignore` 忽略），首次运行任意 `main.py` 子命令时才自动创建，写 key 前先确保目录存在：
+
+```bash
+cd ~/.local/services/xhs-downloader
+mkdir -p Volume
+head -c 32 /dev/urandom > Volume/auth_secret.key
+uv run python main.py token
+```
+
+token 永久有效，绑定 `Volume/auth_secret.key`（不预写 key 文件时程序首次运行会自动随机生成一个，效果等价）。命令输出一行 `鉴权令牌: <token>`，`鉴权令牌: ` 之后的整串就是 `xhs.json` 里 `bearer_token` 的值。
+
+启动：
+
+```bash
+mkdir -p ~/.local/services/logs
+cd ~/.local/services/xhs-downloader && nohup .venv/bin/python ~/.local/services/run-xhs-api.py >> ~/.local/services/logs/xhs-api.log 2>&1 &
+```
+
+停止：
+
+```bash
+kill $(lsof -tnP -iTCP:18601 -sTCP:LISTEN)
+```
+
+cookie（可选，配置后视频才有高清）：编辑 `~/.local/services/xhs-downloader/Volume/settings.json` 的 `cookie` 字段后重启（`settings.json` 也是首次运行后生成）；或按单次请求在 `POST /xhs/detail` 的 body 里传 `cookie` 参数（该接口 body 参数：`url` 必填，`download`、`index`、`cookie`、`proxy`、`check_record` 可选）。
+
+凭据写入 `~/.config/my-mind/xhs.json` 并 `chmod 600`，占位示例：
+
+```json
+{
+  "service": "XHS-Downloader",
+  "base_url": "http://127.0.0.1:18601",
+  "bearer_token": "your-bearer-token",
+  "auth": {
+    "header": "Authorization",
+    "mechanism": "Bearer",
+    "regenerate_command": "cd ~/.local/services/xhs-downloader && uv run python main.py token"
+  },
+  "restart_command": "cd ~/.local/services/xhs-downloader && nohup .venv/bin/python ~/.local/services/run-xhs-api.py >> ~/.local/services/logs/xhs-api.log 2>&1 &",
+  "stop_command": "kill $(lsof -tnP -iTCP:18601 -sTCP:LISTEN)",
+  "cookie": {
+    "note": "your-cookie-note",
+    "global_settings_file": "~/.local/services/xhs-downloader/Volume/settings.json",
+    "per_request": "POST /xhs/detail body 参数 cookie"
+  },
+  "probe": "http://127.0.0.1:18601/",
+  "installed_at": "2026-11-17"
+}
+```
+
+`auth.*` 和 `cookie.*` 是嵌套对象，不是平铺的点号键。
+
+### 服务重启与凭据补办
+
+重启电脑后（两个服务都不配开机自启）：
+
+1. 先等 Docker Desktop 就绪（菜单栏鲸鱼图标静止，或 `docker info` 返回成功）。
+2. 拉起 dtk。`-f` 是相对路径，必须先 `cd`：
+
+```bash
+cd ~/.local/services/dtk
+docker compose -p dtk -f docker/compose.yml up -d --wait
+```
+
+身份池依赖自动铸造时，重启也要带 `--profile browser`，否则 browser 容器不随栈启动，身份池只出不进：
+
+```bash
+cd ~/.local/services/dtk
+docker compose -p dtk -f docker/compose.yml --profile browser up -d --wait
+```
+
+3. 按上一小节「启动」命令拉起 XHS。
+4. 跑一遍下面的 `env_check.py` 复查。
+
+凭据补办：
+
+- dtk API Key 丢失：用管理员账号登录 http://127.0.0.1:18600 控制台，在「API Key」页重建（或按上面 login + api-keys 两条 curl），再把新 Key 更新进 `dtk.json` 的 `api_key`。
+- dtk 管理员密码也丢：先 `docker compose -p dtk -f docker/compose.yml exec api dtk user passwd <name>` 重置，再同步更新 `dtk.json` 的 `admin_password`。
+- XHS token 失效或重发：`cd ~/.local/services/xhs-downloader && uv run python main.py token`，新 token 必须同步写进 `xhs.json` 的 `bearer_token`。
+
+### 环境自检
+
+在仓库根目录执行，共 7 项：Docker、dtk 服务（18600 探活）、XHS 服务（18601 探活）、ffmpeg、ffprobe、`dtk.json`、`xhs.json`。退出码 0 为全部通过，1 为有缺项：
+
+```bash
+python3 .codex/skills/inbox-capture/scripts/env_check.py
+python3 .codex/skills/inbox-capture/scripts/env_check.py --json
+python3 .codex/skills/inbox-capture/scripts/env_check.py --skip-network
+```
+
+`--json` 输出结构化 JSON 结果；`--skip-network` 跳过两个本机服务探活，仅检查本地依赖与配置文件。
+
 ## 目录怎么用
 
 | 目录 | 用途 |
