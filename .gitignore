@@ -8,3 +8,6 @@ __pycache__/
 85_运行记录/*目录映射*.local.json
 85_运行记录/*配置.local.json
 85_运行记录/*.local.jsonl
+85_运行记录/飞书精选页/媒体/
+.v2c/
+.video_agent/
