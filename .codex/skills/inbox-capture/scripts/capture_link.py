@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,22 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
+
+
+# 自建 dtk 服务客户端（同目录独立模块）；缺失时抖音链路降级为旧行为。
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+try:
+    import dtk_client
+except Exception:  # noqa: BLE001 - 模块缺失时保持可运行，抖音链路在解析说明里记录降级。
+    dtk_client = None  # type: ignore[assignment]
+
+# 自建 XHS-Downloader 服务客户端（同目录独立模块）；缺失时小红书链路降级为旧行为。
+try:
+    import xhs_client
+except Exception:  # noqa: BLE001 - 模块缺失时保持可运行，小红书链路在解析说明里记录降级。
+    xhs_client = None  # type: ignore[assignment]
 
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -49,6 +66,13 @@ TRANSCRIPT_KEY_POINT_COUNT = 7
 TRANSCRIPT_TIMELINE_INTERVAL_SECONDS = 300
 DEFAULT_MAX_TRANSCRIBE_SECONDS = 360
 XHS_IMAGE_OCR_MAX_IMAGES = 3
+XHS_IMAGE_OCR_FULL_MAX_IMAGES = 20
+DOUYIN_IMAGE_OCR_MAX_IMAGES = 20
+UI_DEMO_KEYWORDS: tuple[str, ...] = ("演示", "操作", "教程", "界面", "tutorial", "how to")
+DOUYIN_UI_DEMO_KEYWORDS = UI_DEMO_KEYWORDS  # 兼容别名：抖音/小红书共用同一组关键词，避免两处维护。
+DOUYIN_IMAGE_MAX_BYTES = 64 * 1024 * 1024
+DOUYIN_VIDEO_MAX_BYTES = 1024 * 1024 * 1024
+XHS_VIDEO_MAX_BYTES = 1024 * 1024 * 1024
 PADDLEOCR_VL_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_PADDLEOCR_VL_TIMEOUT_SECONDS", "90"))
 PADDLE_TEXT_OCR_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_PADDLE_TEXT_OCR_TIMEOUT_SECONDS", "300"))
 APPLE_VISION_OCR_TIMEOUT_SECONDS = int(os.environ.get("MY_MIND_APPLE_VISION_OCR_TIMEOUT_SECONDS", "120"))
@@ -2592,7 +2616,7 @@ def guess_platform(url: str, info: dict[str, Any] | None = None) -> str:
         return "X"
     if "douyin" in extractor_l or "douyin.com" in host or "iesdouyin.com" in host:
         return "抖音"
-    if "xiaohongshu" in extractor_l or "xiaohongshu.com" in host or "xhslink.com" in host:
+    if "xiaohongshu" in extractor_l or "xiaohongshu.com" in host or "xhslink.com" in host or "xhslink.cn" in host:
         return "小红书"
     if "bilibili" in extractor_l or "bilibili.com" in host:
         return "B站"
@@ -3520,6 +3544,7 @@ def douyin_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
     author_url = ""
     media_url = ""
     tags: list[str] = []
+    image_urls: list[str] = []
 
     if isinstance(item, dict):
         content_id = str(item.get("aweme_id") or item.get("group_id_str") or "")
@@ -3550,6 +3575,12 @@ def douyin_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
         for cha in cha_list:
             if isinstance(cha, dict) and cha.get("cha_name"):
                 tags.append(str(cha["cha_name"]))
+        # 图集作品：公开页 item.images 暴露全部图片，用于类型推断与逐图 OCR 覆盖统计。
+        raw_images = item.get("images") if isinstance(item.get("images"), list) else []
+        for raw_image in raw_images:
+            image_url = first_url_from_media(raw_image)
+            if image_url and image_url not in image_urls:
+                image_urls.append(image_url)
 
     if not author and description:
         author_match = re.search(r"\s-\s(.+?)于(\d{8})发布在抖音", description)
@@ -3582,6 +3613,7 @@ def douyin_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
         "duration": duration,
         "thumbnail": thumbnail,
         "media_url": media_url,
+        "image_urls": image_urls,
         "webpage_url": canonical,
         "original_url": url,
         "extractor_key": "Douyin HTML",
@@ -3596,6 +3628,7 @@ def douyin_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
             "真实链接": final_url,
             "作品编号": content_id,
             "作者编号": author_id,
+            "图片数": len(image_urls) or "",
             "点赞数": like_count,
             "评论数": comment_count,
             "收藏数": collect_count,
@@ -3603,6 +3636,516 @@ def douyin_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
             "封面图": thumbnail,
         },
     }, None
+
+
+DTK_VIDEO_URL_KEYS: tuple[str, ...] = ("url", "play_url", "download_url", "no_watermark_url", "no_watermark", "video_url")
+DTK_IMAGE_URL_KEYS: tuple[str, ...] = ("url", "image_url", "download_url", "origin_url", "no_watermark", "src")
+
+
+def _dtk_first_url(value: Any) -> str:
+    if isinstance(value, str):
+        return clean_url(value)
+    return first_url_from_media(value)
+
+
+def dtk_media_url(data: dict[str, Any]) -> str:
+    """从 dtk 规范化数据里取视频直链：先 media.video 显式键，再 media 子树兜底（避免误取音乐等旁支直链）。"""
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    video_data = data.get("video") if isinstance(data.get("video"), dict) else {}
+    media_video = media.get("video") if isinstance(media.get("video"), dict) else {}
+    explicit_sources: tuple[dict[str, Any], ...] = (media_video, video_data, media)
+    if str(data.get("kind") or "").strip().lower() != "image_album":
+        # 图文作品的直链只认 media.video（幻灯片视频）；其余旁支（音乐/图片源视频）不算作品视频。
+        explicit_sources = explicit_sources + (data,)
+    for source in explicit_sources:
+        for key in DTK_VIDEO_URL_KEYS:
+            url = _dtk_first_url(source.get(key))
+            if url:
+                return url
+    for key in ("no_watermark_url", "play_url", "download_url", "video_url"):
+        for value in walk_values(media, key):
+            url = _dtk_first_url(value)
+            if url:
+                return url
+    for value in walk_values(media_video or video_data, "url"):
+        url = _dtk_first_url(value)
+        if url:
+            return url
+    return ""
+
+
+def dtk_image_urls(data: dict[str, Any]) -> list[str]:
+    """从 dtk 规范化数据里取图集全部图片直链（media.images 优先，保序去重）。"""
+    urls: list[str] = []
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    images = media.get("images") if isinstance(media.get("images"), list) else []
+    if not images:
+        images = data.get("images") if isinstance(data.get("images"), list) else []
+    for image in images:
+        url = ""
+        if isinstance(image, str):
+            url = clean_url(image)
+        elif isinstance(image, dict):
+            for key in DTK_IMAGE_URL_KEYS:
+                url = _dtk_first_url(image.get(key))
+                if url:
+                    break
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def dtk_duration_seconds(data: dict[str, Any]) -> float:
+    """读取 dtk 时长字段并统一为秒：单位按字段名判定，duration_ms 等毫秒字段直接除以 1000。
+
+    裸 duration 字段按秒保留原值，不再做 >10000 除以 1000 的数值启发，避免误伤真实时长超过 10000 秒（约 2 小时 46 分）的超长视频。
+    """
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    media_video = media.get("video") if isinstance(media.get("video"), dict) else {}
+    # 候选链与单位：duration_ms（毫秒）→ duration（秒）→ media.video.duration（秒）。
+    for source, key, is_milliseconds in (
+        (data, "duration_ms", True),
+        (data, "duration", False),
+        (media_video, "duration", False),
+    ):
+        raw = source.get(key)
+        if raw in (None, ""):
+            continue
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return 0.0
+        return value / 1000 if is_milliseconds else value
+    return 0.0
+
+
+def dtk_upload_date(data: dict[str, Any]) -> str:
+    """读取 dtk 发布时间：created_at ISO 字符串或 create_time 时间戳，统一为 YYYYMMDD。"""
+    raw = data.get("created_at") or data.get("create_time")
+    if raw in (None, ""):
+        return ""
+    text = str(raw)
+    iso_match = re.match(r"(\d{4})-(\d{2})-(\d{2})", text)
+    if iso_match:
+        return "".join(iso_match.groups())
+    return timestamp_upload_date(raw)
+
+
+def dtk_tags(data: dict[str, Any], description: str) -> list[str]:
+    """读取 dtk 标签列表（容忍字符串或 {name} 对象），并合并文案话题。"""
+    tags: list[str] = []
+    raw_tags = data.get("tags") if isinstance(data.get("tags"), list) else []
+    for item in raw_tags:
+        tag = str(item.get("name") or item.get("title") or "").strip() if isinstance(item, dict) else str(item or "").strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    for tag in extract_hashtags(description):
+        if tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def douyin_info_from_dtk(data: dict[str, Any], url: str) -> dict[str, Any] | None:
+    """把自建 dtk 服务返回的规范化数据映射为与现有解析链兼容的 info 字段。"""
+    if not isinstance(data, dict) or not data:
+        return None
+    kind = str(data.get("kind") or "").strip().lower()
+    media = data.get("media") if isinstance(data.get("media"), dict) else {}
+    covers = media.get("covers") if isinstance(media.get("covers"), list) else []
+    content_id = str(data.get("content_id") or data.get("aweme_id") or data.get("id") or "")
+    title = str(data.get("title") or data.get("desc") or "").strip()
+    description = str(data.get("desc") or data.get("description") or data.get("title") or "").strip()
+    media_url = dtk_media_url(data)
+    image_urls = dtk_image_urls(data)
+    duration = dtk_duration_seconds(data)
+    author_data = data.get("author") if isinstance(data.get("author"), dict) else {}
+    author = str(author_data.get("nickname") or author_data.get("name") or author_data.get("unique_id") or "")
+    author_id = str(author_data.get("uid") or author_data.get("short_id") or author_data.get("unique_id") or "")
+    sec_uid = str(author_data.get("sec_uid") or "")
+    author_url = clean_url(author_data.get("web_url")) or (f"https://www.douyin.com/user/{sec_uid}" if sec_uid else "")
+    statistics = data.get("stats") if isinstance(data.get("stats"), dict) else data.get("statistics")
+    statistics = statistics if isinstance(statistics, dict) else {}
+    like_count = str(statistics.get("digg_count") or statistics.get("like_count") or data.get("like_count") or "")
+    comment_count = str(statistics.get("comment_count") or data.get("comment_count") or "")
+    share_count = str(statistics.get("share_count") or data.get("share_count") or "")
+    collect_count = str(statistics.get("collect_count") or data.get("collect_count") or "")
+    thumbnail = _dtk_first_url(covers[0]) if covers else (image_urls[0] if image_urls else "")
+    tags = dtk_tags(data, description or title)
+
+    if not any([title, description, media_url, image_urls, content_id]):
+        return None
+    webpage_url = clean_url(data.get("web_url") or data.get("url") or data.get("webpage_url"))
+    if not webpage_url and content_id:
+        webpage_url = f"https://www.douyin.com/video/{content_id}"
+    return {
+        "id": content_id,
+        "title": title or "抖音作品",
+        "description": description,
+        "uploader": author,
+        "uploader_id": author_id,
+        "uploader_url": author_url,
+        "upload_date": dtk_upload_date(data),
+        "duration": str(int(duration)) if duration else "",
+        "thumbnail": thumbnail,
+        "media_url": media_url,
+        "video_media_url": media_url,
+        "image_urls": image_urls,
+        "webpage_url": webpage_url or url,
+        "original_url": url,
+        "extractor_key": "Douyin dtk",
+        "parse_tool": "自建 dtk 服务",
+        "tags": tags,
+        "categories": [],
+        "like_count": like_count,
+        "comment_count": comment_count,
+        "share_count": share_count,
+        "collect_count": collect_count,
+        "platform_meta": {
+            "作品编号": content_id,
+            "作者编号": author_id,
+            "图片数": len(image_urls) or "",
+            "点赞数": like_count,
+            "评论数": comment_count,
+            "收藏数": collect_count,
+            "分享数": share_count,
+            "封面图": thumbnail,
+        },
+        "dtk_kind": kind,
+    }
+
+
+def douyin_needs_dtk(info: dict[str, Any] | None) -> bool:
+    """判断抖音现有解析结果是否需要自建 dtk 兜底：整体失败或缺正文/媒体直链/时长/图集列表。"""
+    if not isinstance(info, dict) or not info:
+        return True
+    has_description = bool(str(info.get("description") or "").strip())
+    has_media = bool(clean_url(info.get("media_url") or ""))
+    has_duration = info.get("duration") not in (None, "")
+    image_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+    has_images = bool(image_urls)
+    return not (has_description and has_duration and (has_media or has_images))
+
+
+def append_parse_notice(info: dict[str, Any], notice: str) -> None:
+    """把说明追加到 info["parse_notice"]（笔记「解析说明」小节）。"""
+    existing = str(info.get("parse_notice") or "").strip()
+    info["parse_notice"] = f"{existing}\n\n{notice}".strip() if existing else notice
+
+
+def douyin_dtk_parse(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    """调用自建 dtk 服务解析抖音链接；错误说明以「自建服务不可用」开头时表示服务未就绪、需降级。"""
+    if dtk_client is None:
+        return None, "自建服务不可用：未找到 dtk_client 模块，跳过自建服务兜底。"
+    try:
+        data = dtk_client.parse(url)
+    except dtk_client.DtkError as exc:
+        message = str(exc)
+        if getattr(exc, "unavailable", False):
+            return None, f"自建服务不可用：{message}"
+        return None, f"自建 dtk 服务解析失败：{message}"
+    except Exception as exc:  # noqa: BLE001 - 任何异常都降级为公开页/yt-dlp 结果。
+        return None, f"自建 dtk 服务调用异常：{exc!r}"
+    dtk_info = douyin_info_from_dtk(data, url)
+    if dtk_info is None:
+        return None, "自建 dtk 服务返回的数据缺少可用的作品内容字段（标题/文案/媒体/编号均为空）。"
+    return dtk_info, None
+
+
+def douyin_dtk_fallback(
+    url: str,
+    info: dict[str, Any] | None,
+    error: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """抖音解析链第二级：公开页失败或缺字段时用自建 dtk 服务兜底；失败则降级回旧行为并记录原因。"""
+    if not douyin_needs_dtk(info):
+        return info, error
+    dtk_info, dtk_error = douyin_dtk_parse(url)
+    if dtk_info is not None:
+        info = merge_info(info, dtk_info) or dtk_info
+        info["dtk_used"] = True
+        # 图集以 dtk 全量列表为准（公开页可能只暴露部分图片）。
+        if dtk_info.get("image_urls"):
+            info["image_urls"] = list(dtk_info["image_urls"])
+        notice = "已使用自建 dtk 服务兜底，补全作品信息与媒体直链；作品类型以 dtk kind 为准。"
+        if error:
+            append_parse_notice(info, f"前序解析失败：{error}\n\n{notice}")
+            error = None
+        else:
+            append_parse_notice(info, notice)
+        return info, error
+    if info is not None:
+        append_parse_notice(info, f"{dtk_error}\n\n已按公开页/yt-dlp 结果降级处理。")
+    elif dtk_error:
+        error = f"{error}\n\n{dtk_error}" if error else dtk_error
+    return info, error
+
+
+def ui_demo_keyword_heuristic(text: str) -> bool:
+    """UI 演示关键词启发式（抖音/小红书共用）：标题/文案含 演示/操作/教程/界面/tutorial/how to 即命中；视觉确认随批次 5。"""
+    lowered = (text or "").lower()
+    return any(keyword in lowered for keyword in UI_DEMO_KEYWORDS)
+
+
+def douyin_ui_demo_heuristic(text: str) -> bool:
+    """抖音侧入口，委托共用启发式，保持既有调用点不变。"""
+    return ui_demo_keyword_heuristic(text)
+
+
+def douyin_work_type(info: dict[str, Any] | None) -> str:
+    """作品类型判定：dtk kind 优先（image_album=图文，video=口播视频/UI演示视频）；无 API 结果时用 HTML 图集标记推断；判定不出返回 未知。"""
+    if not isinstance(info, dict):
+        return "未知"
+    stored = str(info.get("work_type") or "").strip()
+    if stored:
+        return stored
+    text = f"{info.get('title') or ''}\n{info.get('description') or ''}"
+    kind = str(info.get("dtk_kind") or "").strip().lower()
+    if kind == "image_album":
+        return "图文"
+    if kind == "video":
+        return "UI演示视频" if douyin_ui_demo_heuristic(text) else "口播视频"
+    # 无 dtk 结果：用 HTML 图集/视频标记推断。
+    image_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+    has_media = bool(clean_url(info.get("media_url") or ""))
+    has_duration = info.get("duration") not in (None, "")
+    if image_urls and not has_media and not has_duration:
+        return "图文"
+    if has_media or has_duration:
+        return "UI演示视频" if douyin_ui_demo_heuristic(text) else "口播视频"
+    return "未知"
+
+
+def douyin_transcription_allowed(info: dict[str, Any] | None) -> bool:
+    """只有明确判成口播/UI演示视频的抖音作品才允许转写；图文/未知一律不转写（防图文被当视频）。"""
+    return str((info or {}).get("work_type") or "") in {"口播视频", "UI演示视频"}
+
+
+def douyin_media_cache_id(info: dict[str, Any]) -> str:
+    """生成媒体缓存目录名：优先作品编号；缺失时用作品页链接哈希兜底。"""
+    content_id = str(info.get("id") or "").strip()
+    if content_id and re.fullmatch(r"[0-9A-Za-z._-]+", content_id):
+        return content_id
+    anchor = str(info.get("webpage_url") or info.get("original_url") or "")
+    digest = hashlib.sha1(anchor.encode("utf-8")).hexdigest()[:16]
+    return f"no-id-{digest}"
+
+
+def cleanup_douyin_media_cache(content_id: str) -> None:
+    """OCR/校验/转写完成后立即清理抖音媒体缓存目录；失败只吞掉，不影响入箱。"""
+    if dtk_client is None:
+        return
+    try:
+        dtk_client.cleanup_media(content_id)
+    except Exception:  # noqa: BLE001 - 清理失败不影响采集结果。
+        pass
+
+
+def prepare_douyin_video_media(info: dict[str, Any], content_id: str) -> None:
+    """把 dtk 视频直链下载到缓存目录并 ffprobe 校验，回写时长与本地媒体路径；失败记录校验错误。"""
+    media_url = clean_url(info.get("media_url") or "")
+    if not media_url or dtk_client is None:
+        return
+    try:
+        cache_dir = dtk_client.media_cache_dir(content_id)
+        media_path = dtk_client.download_media(
+            media_url,
+            cache_dir,
+            max_bytes=DOUYIN_VIDEO_MAX_BYTES,
+            filename=f"{content_id}.mp4",
+        )
+        probe = dtk_client.ffprobe_check(media_path)
+    except Exception as exc:  # noqa: BLE001 - 校验失败不阻断，直接保留直链与失败原因。
+        info["media_validation_error"] = f"自建 dtk 媒体下载或校验失败：{exc}"
+        return
+    duration_seconds = int(float(probe.get("duration_seconds") or 0))
+    if duration_seconds and not info.get("duration"):
+        info["duration"] = str(duration_seconds)
+    info["local_media_path"] = str(media_path)
+    info["media_validation"] = {
+        "格式": probe.get("format_name", ""),
+        "时长秒": duration_seconds,
+        "大小字节": int(probe.get("size_bytes") or 0),
+    }
+
+
+def prepare_douyin_media(
+    info: dict[str, Any],
+    *,
+    backend: str = "auto",
+    image_ocr: bool = True,
+    extract_content_mode: str = "auto",
+) -> str:
+    """抖音类型判定与媒体准备：图集逐张 OCR、视频下载校验；返回待清理的缓存内容编号。
+
+    image_ocr=False 时跳过图片下载与逐张 OCR；extract_content_mode=="never" 时跳过视频下载与 ffprobe
+    （媒体直链与时长沿用 dtk 元数据），都不产生需要清理的缓存目录。
+    """
+    work_type = douyin_work_type(info)
+    info["work_type"] = work_type
+    if work_type == "未知":
+        if not first_non_empty(info, ["content_extract_error"]):
+            info["content_extract_error"] = (
+                "作品类型未能判定（自建服务未返回 kind，公开页也没有图集/视频标记），已按规则跳过转写，防止把图文当视频处理。"
+            )
+        return ""
+    if work_type == "图文":
+        content_id = douyin_media_cache_id(info)
+        image_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+        if not image_ocr:
+            # --no-image-ocr：不下载图集图片、不跑 OCR；文案等其余媒体信息不受影响。
+            append_parse_notice(info, "已按 --no-image-ocr 参数跳过图片 OCR。")
+            if not info.get("image_ocr"):
+                info["image_ocr_error"] = "已按 --no-image-ocr 参数跳过图片 OCR，图片文字未识别。"
+            return ""
+        if info.get("dtk_used") and image_urls and dtk_client is not None:
+            attach_douyin_image_ocr(info, cache_dir=dtk_client.media_cache_dir(content_id), backend=backend)
+        elif not info.get("image_ocr"):
+            info["image_ocr_error"] = "未获得抖音图集的完整图片直链（自建服务未就绪或未返回图集），逐图 OCR 未执行。"
+        return content_id
+    # 口播视频 / UI演示视频：仅 dtk 链路需要下载校验；公开页直链沿用原转写行为。
+    if not info.get("dtk_used") or dtk_client is None:
+        return ""
+    content_id = douyin_media_cache_id(info)
+    if extract_content_mode == "never":
+        # --no-extract-content：不下载视频、不 ffprobe；笔记的 视频媒体链接 与 时长 直接取 dtk 元数据。
+        return ""
+    prepare_douyin_video_media(info, content_id)
+    return content_id
+
+
+def attach_douyin_image_ocr(
+    info: dict[str, Any],
+    *,
+    cache_dir: Path,
+    backend: str = "auto",
+    max_images: int = DOUYIN_IMAGE_OCR_MAX_IMAGES,
+) -> None:
+    """抖音图集逐张 OCR：dtk 图片直链下载到缓存目录 → 本地 OCR → 覆盖 N/N 写回 image_ocr。"""
+    if info.get("image_ocr") or info.get("image_ocr_error"):
+        return
+    raw_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+    image_urls: list[str] = []
+    for raw_url in raw_urls:
+        url = clean_url(raw_url)
+        if url and url not in image_urls:
+            image_urls.append(url)
+    if not image_urls:
+        info["image_ocr_error"] = "抖音图集未获得图片直链，无法逐张 OCR。"
+        return
+
+    attempted: list[str] = []
+    downloaded: list[tuple[int, str, Path]] = []
+    for index, image_url in enumerate(image_urls[:max_images], start=1):
+        suffix = Path(urlparse(image_url).path).suffix or ".jpg"
+        filename = f"douyin-image-{index:02d}{suffix}"
+        try:
+            image_path = dtk_client.download_media(image_url, cache_dir, max_bytes=DOUYIN_IMAGE_MAX_BYTES, filename=filename)
+        except Exception as exc:  # noqa: BLE001 - 单张失败不阻断其余图片。
+            attempted.append(f"图片 {index}：{exc}")
+            continue
+        downloaded.append((index, image_url, image_path))
+
+    if not downloaded:
+        info["image_ocr_error"] = "没有可用于 OCR 的抖音图片。\n\n" + "\n".join(attempted)
+        return
+
+    image_paths = [item[2] for item in downloaded]
+    records: list[dict[str, Any]] = []
+    selected_backend = "PaddleOCR"
+    model = ""
+    normalized_backend = backend.strip().lower()
+    if normalized_backend in {"auto", "paddleocr"}:
+        records, ocr_error = run_paddle_text_ocr(image_paths)
+        model = "PP-OCRv5_server_det+PP-OCRv5_server_rec"
+        if ocr_error and normalized_backend == "auto":
+            paddle_error = ocr_error
+            records, ocr_error = run_apple_vision_ocr(image_paths)
+            selected_backend = "Apple Vision"
+            model = ""
+            if ocr_error:
+                info["image_ocr_error"] = "PaddleOCR 文本 OCR 失败：\n" + paddle_error + "\n\nApple Vision OCR 失败：\n" + ocr_error
+                if attempted:
+                    info["image_ocr_error"] += "\n\n图片下载问题：\n" + "\n".join(attempted)
+                return
+    elif normalized_backend == "apple-vision":
+        records, ocr_error = run_apple_vision_ocr(image_paths)
+        selected_backend = "Apple Vision"
+        model = ""
+    elif normalized_backend == "paddleocr-vl":
+        records, ocr_error = run_paddleocr_vl_ocr(image_paths)
+        selected_backend = "PaddleOCR-VL"
+        model = "PaddleOCR-VL-1.6"
+    else:
+        info["image_ocr_error"] = f"未知 OCR 后端：{backend}"
+        return
+
+    if ocr_error:
+        info["image_ocr_error"] = f"{selected_backend} OCR 失败：\n" + ocr_error
+        if attempted:
+            info["image_ocr_error"] += "\n\n图片下载问题：\n" + "\n".join(attempted)
+        return
+
+    record_by_path = {str(record.get("path") or ""): record for record in records}
+    first_record = records[0] if records else {}
+    items: list[dict[str, Any]] = []
+    ocr_errors: list[str] = attempted[:]
+    for index, image_url, image_path in downloaded:
+        record = record_by_path.get(str(image_path), {})
+        if record.get("error"):
+            ocr_errors.append(f"图片 {index}：{record.get('error')}")
+        lines = record.get("lines") if isinstance(record.get("lines"), list) else []
+        text = "\n".join(str(line) for line in lines if str(line).strip())
+        if not text:
+            text = str(record.get("text") or "")
+        text = normalize_cjk_text(text)
+        if text:
+            items.append(
+                {
+                    "index": index,
+                    "source_url": image_url,
+                    "text": text,
+                    "line_count": len(lines),
+                }
+            )
+
+    combined_text = "\n".join(str(item.get("text") or "") for item in items)
+    info["image_ocr"] = {
+        "source": "抖音图集图片 OCR",
+        "backend": str(first_record.get("backend") or selected_backend),
+        "model": str(first_record.get("model") or model),
+        "pipeline_version": str(first_record.get("pipeline_version") or ""),
+        "compatibility": str(first_record.get("compatibility") or ""),
+        "image_count": len(image_urls),
+        "processed_count": len(downloaded),
+        "text_image_count": len(items),
+        "word_count": transcript_word_count(combined_text),
+        "items": items,
+        "errors": ocr_errors,
+    }
+
+
+def build_modality_coverage(
+    *,
+    work_type: str,
+    description: str,
+    image_count: int,
+    image_ocr: dict[str, Any] | None,
+    content_extract: dict[str, Any] | None,
+) -> str:
+    """生成「模态覆盖」字段：文案/图片OCR/转写/画面解析；批次 4 前转写只标 已完成/未开始。"""
+    parts = [f"文案={'完整' if str(description or '').strip() else '缺失'}"]
+    if work_type == "图文":
+        processed = intish(image_ocr.get("processed_count")) if image_ocr else 0
+        parts.append(f"图片OCR={processed}/{image_count}")
+        parts.append("转写=不适用")
+    elif work_type in {"口播视频", "UI演示视频"}:
+        parts.append("图片OCR=不适用")
+        parts.append("转写=已完成" if content_extract else "转写=未开始")
+    else:
+        parts.append("图片OCR=未开始")
+        parts.append("转写=未开始")
+    parts.append("画面解析=未开始")
+    return " | ".join(parts)
 
 
 def xiaohongshu_note_from_state(state: dict[str, Any]) -> dict[str, Any] | None:
@@ -3716,6 +4259,329 @@ def xiaohongshu_page_info(url: str) -> tuple[dict[str, Any] | None, str | None]:
             "封面图": thumbnail,
         },
     }, None
+
+
+def xhs_first_text(data: dict[str, Any], keys: tuple[str, ...]) -> str:
+    """从 XHS-Downloader 中文键 data 里按候选键顺序取第一个非空文本（容忍数字值）。"""
+    for key in keys:
+        value = data.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return str(value)
+    return ""
+
+
+def xhs_download_urls(data: dict[str, Any]) -> list[str]:
+    """读取 下载地址 数组（图文/图集=各图 URL，视频=[mp4 直链]），清洗并保序去重。"""
+    urls: list[str] = []
+    raw_list = data.get("下载地址") if isinstance(data.get("下载地址"), list) else []
+    for item in raw_list:
+        url = clean_url(item)
+        if url and url not in urls:
+            urls.append(url)
+    return urls
+
+
+def xhs_upload_date(data: dict[str, Any]) -> str:
+    """读取发布时间并统一为 YYYYMMDD（容忍 2026-11-17 12:34:56 / 2026.11.17 / 时间戳）。"""
+    text = xhs_first_text(data, ("发布时间", "发布日期"))
+    if not text:
+        return ""
+    match = re.match(r"(\d{4})[-/.年](\d{1,2})[-/.月](\d{1,2})", text)
+    if match:
+        return f"{match.group(1)}{int(match.group(2)):02d}{int(match.group(3)):02d}"
+    return timestamp_upload_date(text)
+
+
+def xhs_tags(data: dict[str, Any], description: str) -> list[str]:
+    """读取标签列表（容忍字符串或 {name} 对象），并合并文案话题。"""
+    tags: list[str] = []
+    raw_tags = data.get("标签") if isinstance(data.get("标签"), list) else []
+    if not raw_tags:
+        raw_tags = data.get("作品标签") if isinstance(data.get("作品标签"), list) else []
+    for item in raw_tags:
+        tag = str(item.get("name") or item.get("title") or "").strip() if isinstance(item, dict) else str(item or "").strip()
+        if tag and tag not in tags:
+            tags.append(tag)
+    for tag in extract_hashtags(description):
+        if tag not in tags:
+            tags.append(tag)
+    return tags
+
+
+def xiaohongshu_info_from_xhs(data: dict[str, Any], url: str) -> dict[str, Any] | None:
+    """把自建 XHS-Downloader 服务返回的中文键 data 映射为与现有解析链兼容的 info 字段。"""
+    if not isinstance(data, dict) or not data:
+        return None
+    kind = str(data.get("作品类型") or "").strip()
+    download_urls = xhs_download_urls(data)
+    image_urls = download_urls if kind in {"图文", "图集"} else []
+    media_url = download_urls[0] if kind == "视频" else ""
+    note_id = xhs_first_text(data, ("作品ID", "笔记ID", "作品编号"))
+    title = xhs_first_text(data, ("作品标题", "标题"))
+    description = xhs_first_text(data, ("作品描述", "描述", "作品标题"))
+    author = xhs_first_text(data, ("作者昵称", "作者"))
+    author_id = xhs_first_text(data, ("作者ID", "作者编号"))
+    like_count = xhs_first_text(data, ("点赞数量", "点赞数", "点赞"))
+    comment_count = xhs_first_text(data, ("评论数量", "评论数", "评论"))
+    collect_count = xhs_first_text(data, ("收藏数量", "收藏数", "收藏"))
+    share_count = xhs_first_text(data, ("分享数量", "分享数", "分享"))
+    thumbnail = clean_url(data.get("封面地址") or "") or (image_urls[0] if image_urls else "")
+    tags = xhs_tags(data, description or title)
+
+    if not any([title, description, media_url, image_urls, note_id]):
+        return None
+    webpage_url = clean_url(url)
+    if note_id:
+        # 有笔记编号时统一规范为稳定作品页链接（短链输入也覆盖）；原始短链保留在 original_url，不丢信息。
+        webpage_url = f"https://www.xiaohongshu.com/explore/{note_id}"
+    duration = ""
+    for key in ("视频时长", "作品时长", "时长"):
+        raw_duration = data.get(key)
+        if raw_duration in (None, ""):
+            continue
+        try:
+            duration = str(int(float(raw_duration)))
+        except (TypeError, ValueError):
+            duration = str(raw_duration)
+        break
+    return {
+        "id": note_id,
+        "title": title or "小红书笔记",
+        "description": description,
+        "uploader": author,
+        "uploader_id": author_id,
+        "uploader_url": f"https://www.xiaohongshu.com/user/profile/{author_id}" if author_id else "",
+        "upload_date": xhs_upload_date(data),
+        "duration": duration,
+        "thumbnail": thumbnail,
+        "media_url": media_url,
+        "video_media_url": media_url,
+        "image_urls": image_urls,
+        "webpage_url": webpage_url,
+        "original_url": url,
+        "extractor_key": "XiaoHongShu XHS",
+        "parse_tool": "自建 XHS-Downloader 服务",
+        "tags": tags,
+        "categories": [],
+        "like_count": like_count,
+        "comment_count": comment_count,
+        "share_count": share_count,
+        "collect_count": collect_count,
+        "platform_meta": {
+            "笔记编号": note_id,
+            "笔记类型": {"视频": "video", "图文": "normal", "图集": "normal"}.get(kind, ""),
+            "图片数": len(image_urls) or "",
+            "点赞数": like_count,
+            "评论数": comment_count,
+            "收藏数": collect_count,
+            "分享数": share_count,
+            "封面图": thumbnail,
+        },
+        "xhs_kind": kind,
+    }
+
+
+def xiaohongshu_needs_fallback(info: dict[str, Any] | None) -> bool:
+    """判断小红书公开页结果是否需要自建服务兜底：整体失败、视频作品需要媒体直链、或图片列表不全。"""
+    if not isinstance(info, dict) or not info:
+        return True
+    meta = info.get("platform_meta") if isinstance(info.get("platform_meta"), dict) else {}
+    image_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+    note_type = str(meta.get("笔记类型") or "").strip().lower()
+    if note_type == "video":
+        return True  # 视频作品需要媒体直链，公开页从不暴露。
+    declared = intish(meta.get("图片数"))
+    if declared and declared > len(image_urls):
+        return True  # 声明的图片数多于已获取直链，列表不全。
+    if declared <= 0:
+        return True  # 公开页没暴露 imageList（只剩 og:image 封面兜底）。
+    return False
+
+
+def xiaohongshu_xhs_parse(url: str) -> tuple[dict[str, Any] | None, str | None]:
+    """调用自建 XHS-Downloader 服务解析小红书链接；错误说明以「小红书兜底服务不可用」开头表示服务未就绪、需降级。"""
+    if xhs_client is None:
+        return None, "小红书兜底服务不可用：未找到 xhs_client 模块，跳过自建服务兜底。"
+    try:
+        data = xhs_client.fetch_detail(url)
+    except xhs_client.XhsError as exc:
+        message = str(exc)
+        if getattr(exc, "unavailable", False):
+            return None, f"小红书兜底服务不可用：{message}"
+        return None, f"自建 XHS-Downloader 服务解析失败：{message}"
+    except Exception as exc:  # noqa: BLE001 - 任何异常都降级为公开页结果。
+        return None, f"自建 XHS-Downloader 服务调用异常：{exc!r}"
+    xhs_info = xiaohongshu_info_from_xhs(data, url)
+    if xhs_info is None:
+        return None, "自建 XHS-Downloader 服务返回的数据缺少可用的作品内容字段（标题/文案/媒体/编号均为空）。"
+    return xhs_info, None
+
+
+def xiaohongshu_xhs_fallback(
+    url: str,
+    info: dict[str, Any] | None,
+    error: str | None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """小红书解析链第二级：公开页失败/图片列表不全/视频需要媒体时用自建服务兜底；失败则降级回旧行为并记录原因。"""
+    if not xiaohongshu_needs_fallback(info):
+        return info, error
+    xhs_info, xhs_error = xiaohongshu_xhs_parse(url)
+    if xhs_info is not None:
+        info = merge_info(info, xhs_info) or xhs_info
+        info["xhs_used"] = True
+        # 图集以服务全量列表为准（公开页可能只暴露部分图片）。
+        if xhs_info.get("image_urls"):
+            info["image_urls"] = list(xhs_info["image_urls"])
+        notice = "已使用自建 XHS-Downloader 服务兜底，补全作品信息与媒体直链；作品类型以服务返回的作品类型为准。"
+        if error:
+            append_parse_notice(info, f"前序解析失败：{error}\n\n{notice}")
+            error = None
+        else:
+            append_parse_notice(info, notice)
+        return info, error
+    if info is not None:
+        append_parse_notice(info, f"{xhs_error}\n\n已按公开页结果降级处理。")
+    elif xhs_error:
+        error = f"{error}\n\n{xhs_error}" if error else xhs_error
+    return info, error
+
+
+def xiaohongshu_work_type(info: dict[str, Any] | None) -> str:
+    """小红书作品类型判定：服务 作品类型 优先（图文/图集→图文，视频→口播视频/UI演示视频，共用抖音关键词启发式）；无服务结果时用公开页 笔记类型/图片标记 推断；判定不出返回 未知。"""
+    if not isinstance(info, dict):
+        return "未知"
+    stored = str(info.get("work_type") or "").strip()
+    if stored:
+        return stored
+    text = f"{info.get('title') or ''}\n{info.get('description') or ''}"
+    kind = str(info.get("xhs_kind") or "").strip()
+    if kind in {"图文", "图集"}:
+        return "图文"
+    if kind == "视频":
+        return "UI演示视频" if ui_demo_keyword_heuristic(text) else "口播视频"
+    # 无服务结果：用公开页笔记类型/图片标记推断。
+    meta = info.get("platform_meta") if isinstance(info.get("platform_meta"), dict) else {}
+    note_type = str(meta.get("笔记类型") or "").strip().lower()
+    image_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+    has_media = bool(clean_url(info.get("media_url") or ""))
+    if note_type == "normal" and image_urls:
+        return "图文"
+    if note_type == "video" or has_media:
+        return "UI演示视频" if ui_demo_keyword_heuristic(text) else "口播视频"
+    if image_urls:
+        return "图文"
+    return "未知"
+
+
+def xiaohongshu_transcription_allowed(info: dict[str, Any] | None) -> bool:
+    """只有明确判成口播/UI演示视频的小红书作品才允许转写；图文/未知一律不转写（防图文被当视频）。"""
+    return str((info or {}).get("work_type") or "") in {"口播视频", "UI演示视频"}
+
+
+def xiaohongshu_media_cache_id(info: dict[str, Any]) -> str:
+    """生成媒体缓存目录名：优先笔记编号；缺失时用作品页链接哈希兜底。"""
+    note_id = str(info.get("id") or "").strip()
+    if note_id and re.fullmatch(r"[0-9A-Za-z._-]+", note_id):
+        return note_id
+    anchor = str(info.get("webpage_url") or info.get("original_url") or "")
+    digest = hashlib.sha1(anchor.encode("utf-8")).hexdigest()[:16]
+    return f"no-id-{digest}"
+
+
+def cleanup_xhs_media_cache(note_id: str) -> None:
+    """校验/转写完成后立即清理小红书媒体缓存目录；失败只吞掉，不影响入箱。"""
+    if xhs_client is None:
+        return
+    try:
+        xhs_client.cleanup_media(note_id)
+    except Exception:  # noqa: BLE001 - 清理失败不影响采集结果。
+        pass
+
+
+def prepare_xhs_video_media(info: dict[str, Any], note_id: str) -> None:
+    """把自建服务返回的视频直链下载到缓存目录并 ffprobe 校验，回写时长与本地媒体路径；失败记录校验错误。"""
+    media_url = clean_url(info.get("media_url") or "")
+    if not media_url or xhs_client is None:
+        return
+    try:
+        cache_dir = xhs_client.media_cache_dir(note_id)
+        media_path = xhs_client.download_media(
+            media_url,
+            cache_dir,
+            max_bytes=XHS_VIDEO_MAX_BYTES,
+            filename=f"{note_id}.mp4",
+        )
+        probe = xhs_client.ffprobe_check(media_path)
+    except Exception as exc:  # noqa: BLE001 - 校验失败不阻断，直接保留直链与失败原因。
+        info["media_validation_error"] = f"自建 XHS-Downloader 媒体下载或校验失败：{exc}"
+        return
+    duration_seconds = int(float(probe.get("duration_seconds") or 0))
+    if duration_seconds and not info.get("duration"):
+        info["duration"] = str(duration_seconds)
+    info["local_media_path"] = str(media_path)
+    info["media_validation"] = {
+        "格式": probe.get("format_name", ""),
+        "时长秒": duration_seconds,
+        "大小字节": int(probe.get("size_bytes") or 0),
+    }
+
+
+def prepare_xhs_media(
+    info: dict[str, Any],
+    *,
+    backend: str = "auto",
+    image_ocr: bool = True,
+    extract_content_mode: str = "auto",
+) -> str:
+    """小红书类型判定与媒体准备：图文（兜底补全后）全量逐张 OCR、视频下载校验；返回待清理的缓存笔记编号。
+
+    image_ocr=False 时跳过图片下载与逐张 OCR；extract_content_mode=="never" 时跳过视频下载与 ffprobe
+    （媒体直链与时长沿用服务元数据），都不产生需要清理的缓存目录。
+    """
+    work_type = xiaohongshu_work_type(info)
+    info["work_type"] = work_type
+    if work_type == "未知":
+        if not first_non_empty(info, ["content_extract_error"]):
+            info["content_extract_error"] = (
+                "作品类型未能判定（自建服务未返回作品类型，公开页也没有图文/视频标记），已按规则跳过转写，防止把图文当视频处理。"
+            )
+        return ""
+    if work_type == "图文":
+        image_urls = info.get("image_urls") if isinstance(info.get("image_urls"), list) else []
+        if not image_ocr:
+            # --no-image-ocr：不下载图片、不跑 OCR（含兜底全量 OCR）；文案等其余媒体信息不受影响。
+            append_parse_notice(info, "已按 --no-image-ocr 参数跳过图片 OCR。")
+            if not info.get("image_ocr"):
+                info["image_ocr_error"] = "已按 --no-image-ocr 参数跳过图片 OCR，图片文字未识别。"
+            return ""
+        if info.get("xhs_used") and image_urls:
+            # 兜底已补全全量图片直链：清掉快速路径留下的部分覆盖结果，全量重新逐张 OCR（总量上限保护）。
+            attach_xhs_image_ocr_full(info, backend=backend)
+        return ""  # 图片经临时目录下载，无媒体缓存目录需要清理。
+    # 口播视频 / UI演示视频：仅自建服务链路需要下载校验；公开页直链沿用原转写行为。
+    if not info.get("xhs_used") or xhs_client is None:
+        return ""
+    note_id = xiaohongshu_media_cache_id(info)
+    if extract_content_mode == "never":
+        # --no-extract-content：不下载视频、不 ffprobe；笔记的 视频媒体链接 与 时长 直接取服务元数据。
+        return ""
+    prepare_xhs_video_media(info, note_id)
+    return note_id
+
+
+def attach_xhs_image_ocr_full(
+    info: dict[str, Any],
+    *,
+    backend: str = "auto",
+    max_images: int = XHS_IMAGE_OCR_FULL_MAX_IMAGES,
+) -> None:
+    """XHS-Downloader 兜底补全全量图片后的覆盖式逐张 OCR：覆盖 N/N 进模态覆盖，未全覆盖由质量门禁拦下。"""
+    # 快速路径（XHS_IMAGE_OCR_MAX_IMAGES=3）可能已留下部分覆盖结果；全量列表到手后整体重做。
+    info.pop("image_ocr", None)
+    info.pop("image_ocr_error", None)
+    attach_image_ocr(info, max_images=max_images, backend=backend)
 
 
 def download_ocr_image(url: str, output_path: Path) -> str | None:
@@ -4241,7 +5107,12 @@ def attach_content_extract(
 ) -> None:
     if info.get("content_extract") or info.get("content_extract_error"):
         return
-    media_url = media_url_from_info(info)
+    # 抖音 dtk 链路已把媒体下载到缓存目录时优先用本地文件，避免直链过期或限速。
+    local_media_path = str(info.get("local_media_path") or "")
+    if local_media_path and Path(local_media_path).exists():
+        media_url = local_media_path
+    else:
+        media_url = media_url_from_info(info)
     if not media_url:
         info["content_extract_error"] = "当前链接未暴露可转写的公开视频地址"
         return
@@ -4451,6 +5322,7 @@ def assess_content_quality(
     image_ocr_error: str,
     youtube_subtitle: dict[str, Any] | None,
     external_transcript: dict[str, Any] | None,
+    work_type: str = "",
 ) -> tuple[str, str]:
     """Return a coarse quality gate for downstream triage and frontdesk push."""
     if parse_status == "解析失败":
@@ -4460,14 +5332,36 @@ def assess_content_quality(
     has_image_ocr = bool(image_ocr and intish(image_ocr.get("word_count")) >= 80)
     has_description = len(description.strip()) >= 120
     has_external_source = bool(youtube_subtitle or external_transcript)
-    is_video = material_type == "视频链接" or platform in {"抖音", "YouTube", "TikTok"}
-    is_xhs_image = platform == "小红书" and intish(platform_meta.get("图片数")) > 0
+    if platform in {"抖音", "小红书"}:
+        # 抖音/小红书以「作品类型」决定视频/图文判定，防止图集被当成视频要求转写。
+        is_video = work_type in {"口播视频", "UI演示视频"}
+    else:
+        is_video = material_type == "视频链接" or platform in {"YouTube", "TikTok"}
+    is_douyin_image = platform == "抖音" and work_type == "图文"
+    is_xhs_image = platform == "小红书" and work_type == "图文"
+
+    if is_douyin_image and not image_ocr:
+        reason = image_ocr_error or "抖音图文尚未完成逐图 OCR。"
+        return "需继续解析", f"{reason} 不应直接进入前台阅读推送。"
+    if is_xhs_image and not image_ocr:
+        reason = image_ocr_error or "小红书图文尚未完成逐图 OCR。"
+        return "需继续解析", f"{reason} 不应直接进入前台阅读推送。"
+    if platform in {"抖音", "小红书"} and work_type == "未知":
+        return "需继续解析", "作品类型未能判定（图文/视频不明），需补齐自建服务解析或人工确认类型；不应进入前台阅读推送。"
+
+    # 设计稿子设计四：图文可推送 = 文案完整 且 OCR N/N；文案缺失即视为解析不完整，待补文案。
+    if (is_douyin_image or is_xhs_image) and not str(description or "").strip():
+        return "需继续解析", "分享文案缺失，图文解析不完整。"
 
     if is_video and not has_content_extract:
         if has_external_source:
             return "需核验", "已有字幕或外部转录来源，但收件箱未生成正文级摘要；推送前建议先整理摘要。"
         reason = content_extract_error or "视频内容尚未转写。"
         return "需继续解析", f"{reason} 不应直接进入前台阅读推送。"
+
+    if platform in {"抖音", "小红书"} and work_type == "UI演示视频":
+        # 设计稿子设计四：批次 5 视觉分析落地前，UI 演示视频的画面解析恒为未开始，转写完成也不进入推送。
+        return "需继续解析", "UI 演示视频的画面解析尚未执行（视觉分析批次缓后），转写完成也不进入推送，等待画面解析或人工改判作品类型。"
 
     if is_xhs_image and not has_image_ocr:
         reason = image_ocr_error or "小红书图文尚未获得可读 OCR。"
@@ -4509,7 +5403,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
     description = str(info.get("description") or "").strip()
     thumbnail = first_non_empty(info, ["thumbnail"])
     image_urls = [str(value) for value in info.get("image_urls", []) if str(value).strip()] if isinstance(info.get("image_urls"), list) else []
-    video_media_url = video_media_url_from_info(info)
+    video_media_url = first_non_empty(info, ["video_media_url"]) or video_media_url_from_info(info)
     extractor = first_non_empty(info, ["extractor_key", "extractor"])
     parse_tool = first_non_empty(info, ["parse_tool"]) or ("yt-dlp" if shutil.which("yt-dlp") else "")
     content_id = first_non_empty(info, ["id", "display_id", "aweme_id", "note_id"])
@@ -4533,6 +5427,22 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
     image_ocr = info.get("image_ocr") if isinstance(info.get("image_ocr"), dict) else None
     image_ocr_error = first_non_empty(info, ["image_ocr_error"])
     parse_notice = first_non_empty(info, ["parse_notice"])
+    media_validation = info.get("media_validation") if isinstance(info.get("media_validation"), dict) else None
+    media_validation_error = first_non_empty(info, ["media_validation_error"])
+    work_type = (
+        douyin_work_type(info) if platform == "抖音" else xiaohongshu_work_type(info) if platform == "小红书" else ""
+    )
+    modality_coverage = (
+        build_modality_coverage(
+            work_type=work_type,
+            description=description,
+            image_count=len(image_urls),
+            image_ocr=image_ocr,
+            content_extract=content_extract,
+        )
+        if platform in {"抖音", "小红书"}
+        else ""
+    )
     parse_status = "已解析" if info and not error else "解析失败"
     if info and error:
         parse_status = "部分解析"
@@ -4552,13 +5462,18 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
         image_ocr_error=image_ocr_error,
         youtube_subtitle=youtube_subtitle,
         external_transcript=external_transcript,
+        work_type=work_type,
     )
 
     filename = sanitize_filename_part(f"{now_date()} {platform} - {title}") + ".md"
+    work_type_frontmatter = (
+        [yaml_field("作品类型", work_type), yaml_field("模态覆盖", modality_coverage)] if platform in {"抖音", "小红书"} else []
+    )
     body = [
         "---",
         yaml_field("类别", "收件箱"),
         yaml_field("资料类型", material_type),
+        *work_type_frontmatter,
         yaml_field("来源平台", platform),
         yaml_field("标题", title),
         yaml_field("作者或频道", author),
@@ -4620,6 +5535,9 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
         f"- 质量门禁：{quality_gate}",
     ]
 
+    if platform in {"抖音", "小红书"}:
+        body.extend([f"- 作品类型：{work_type or '未知'}", f"- 模态覆盖：{modality_coverage}"])
+
     if content_quality != "可推送":
         body.extend(["", "## 质量门禁", "", quality_gate])
 
@@ -4638,6 +5556,12 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
         ("收藏数", platform_meta.get("收藏数") or collect_count),
         ("分享数", platform_meta.get("分享数") or share_count),
         ("封面图", platform_meta.get("封面图") or thumbnail),
+        (
+            "媒体校验",
+            f"{media_validation.get('格式') or '未知格式'}｜{media_validation.get('时长秒') or 0} 秒｜{media_validation.get('大小字节') or 0} 字节"
+            if media_validation
+            else None,
+        ),
     ]
     platform_lines = [(label, value) for label, value in platform_lines if value not in (None, "", [])]
     if platform_lines:
@@ -4658,12 +5582,20 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
             body.append("")
         body.append(error.strip())
 
+    if media_validation_error:
+        body.extend(["", "## 媒体校验失败", "", media_validation_error])
+
     excerpt_heading = "文案摘录" if platform in {"抖音", "小红书", "X", "TikTok"} else "简介摘录"
     body.extend(["", f"## {excerpt_heading}", "", description or "暂无。"])
 
     if image_ocr:
         items = image_ocr.get("items") if isinstance(image_ocr.get("items"), list) else []
         errors = image_ocr.get("errors") if isinstance(image_ocr.get("errors"), list) else []
+        ocr_source_note = (
+            "说明：这里保存的是抖音图集图片的本机 OCR 结果，用于后续整理；OCR 可能存在错字，沉淀前需要校对关键术语和事实。"
+            if "抖音" in str(image_ocr.get("source") or "")
+            else "说明：这里保存的是小红书公开图片的本机 OCR 结果，用于后续整理；OCR 可能存在错字，沉淀前需要校对关键术语和事实。"
+        )
         body.extend(
             [
                 "",
@@ -4678,7 +5610,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
                 f"- 识别到文字图片数：{image_ocr.get('text_image_count', 0)}",
                 f"- 估算字数：{image_ocr.get('word_count', 0)}",
                 "",
-                "说明：这里保存的是小红书公开图片的本机 OCR 结果，用于后续整理；OCR 可能存在错字，沉淀前需要校对关键术语和事实。",
+                ocr_source_note,
             ]
         )
         if items:
@@ -4908,17 +5840,68 @@ def capture_url(
                 error = None
         elif page_error:
             error = f"{error}\n\n{page_error}" if error else page_error
-    if image_ocr and info and not dry_run and guess_platform(url, info) == "小红书":
-        attach_image_ocr(info, max_images=max_ocr_images, backend=image_ocr_backend)
-    if should_extract_content(info, extract_content_mode) and info and not dry_run:
-        attach_content_extract(
-            info,
-            backend=transcribe_backend,
-            model=transcribe_model,
-            language=transcribe_language,
-            command_template=transcribe_command,
-            max_seconds=max_transcribe_seconds,
-        )
+        if platform == "抖音" and not dry_run:
+            # 解析链第二级：公开页失败或缺正文/媒体/时长时用自建 dtk 服务兜底。
+            info, error = douyin_dtk_fallback(url, info, error)
+        elif platform == "小红书" and not dry_run:
+            # 解析链第二级：公开页失败/图片列表不全/视频需要媒体时用自建 XHS-Downloader 服务兜底。
+            info, error = xiaohongshu_xhs_fallback(url, info, error)
+
+    douyin_cache_id = ""
+    xhs_cache_id = ""
+    is_douyin = bool(info) and guess_platform(url, info or {}) == "抖音"
+    is_xhs = bool(info) and guess_platform(url, info or {}) == "小红书"
+    try:
+        # prepare 调用纳入 try/finally：先按下述规则占位缓存编号，prepare 中途异常（如 OCR 子进程启动失败）时
+        # finally 仍能清理已建立的媒体缓存；prepare 正常返回空串（跳过下载/OCR）则不清理。
+        if is_douyin and not dry_run:
+            douyin_cache_id = douyin_media_cache_id(info or {})
+            douyin_cache_id = prepare_douyin_media(
+                info or {},
+                backend=image_ocr_backend,
+                image_ocr=image_ocr,
+                extract_content_mode=extract_content_mode,
+            )
+        if is_xhs and not dry_run:
+            xhs_cache_id = xiaohongshu_media_cache_id(info or {})
+            xhs_cache_id = prepare_xhs_media(
+                info or {},
+                backend=image_ocr_backend,
+                image_ocr=image_ocr,
+                extract_content_mode=extract_content_mode,
+            )
+        if image_ocr and info and not dry_run and guess_platform(url, info) == "小红书":
+            attach_image_ocr(info, max_images=max_ocr_images, backend=image_ocr_backend)
+        extract_allowed = should_extract_content(info, extract_content_mode)
+        if is_douyin and info is not None and not douyin_transcription_allowed(info):
+            if extract_allowed and not first_non_empty(info, ["content_extract_error"]):
+                if str(info.get("work_type") or "") == "图文":
+                    info["content_extract_error"] = "图文作品按规则不触发转写；正文模态由文案与逐图 OCR 覆盖。"
+                else:
+                    info["content_extract_error"] = "作品类型未判定（图文/视频不明），已跳过转写，防止把图文当视频处理。"
+            extract_allowed = False
+        if is_xhs and info is not None and not xiaohongshu_transcription_allowed(info):
+            if extract_allowed and not first_non_empty(info, ["content_extract_error"]):
+                if str(info.get("work_type") or "") == "图文":
+                    info["content_extract_error"] = "图文作品按规则不触发转写；正文模态由文案与逐图 OCR 覆盖。"
+                else:
+                    info["content_extract_error"] = "作品类型未判定（图文/视频不明），已跳过转写，防止把图文当视频处理。"
+            extract_allowed = False
+        if extract_allowed and info and not dry_run:
+            attach_content_extract(
+                info,
+                backend=transcribe_backend,
+                model=transcribe_model,
+                language=transcribe_language,
+                command_template=transcribe_command,
+                max_seconds=max_transcribe_seconds,
+            )
+    finally:
+        # 设计决策：OCR/校验/转写完成后立即删除本地媒体，笔记只留作品页链接与媒体直链。
+        if douyin_cache_id:
+            cleanup_douyin_media_cache(douyin_cache_id)
+        if xhs_cache_id:
+            cleanup_xhs_media_cache(xhs_cache_id)
     filename, note = build_note(url, info, error, reading_status=reading_status)
     output_path = unique_path(inbox, filename)
     if not dry_run:
