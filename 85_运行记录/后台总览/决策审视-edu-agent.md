@@ -3,7 +3,7 @@
 记录类型: 决策审视
 项目: edu-agent
 项目键: edu-agent
-生成时间: 2026-06-23 20:33:31 +0800
+生成时间: 2026-09-28 20:34:20 +0800
 审视模型建议: gpt-5.4 / xhigh
 最高风险: 高
 建议动作: 把任务清单压缩成 3 个以内的本周最小动作。
@@ -17,8 +17,8 @@
 - 目标：把 PDF 题目入库、裁题/OCR、存储、OpenAPI、前端对接和质量验证收敛成可复核交付。
 - 风险等级：高
 - 结论：需要先收敛方向和工作区，再继续扩大实现。
-- 近期 commit：20
-- 工作区改动：23
+- 近期 commit：5
+- 工作区改动：1339
 - 项目文件：7
 - 自动修改项目文件：否
 
@@ -37,7 +37,8 @@
 ## 偏航风险
 
 - 任务清单未完成项较多，容易把忙碌误认为推进。
-- 工作区已有 23 个未提交改动，当前决策横跨多个批次。
+- 后端代码有变化但测试证据不足，可能提前进入功能扩张。
+- 工作区已有 1339 个未提交改动，当前决策横跨多个批次。
 - 近期已有 commit 但工作区仍未闭合，项目结论可能跨越多个未复核上下文。
 
 ## 机会成本
@@ -61,52 +62,46 @@
 
 ## 证据概览
 
-- 测试：8 项
+- 后端：1327 项
 - 其他：7 项
-- 后端：5 项
-- 设计：3 项
+- 配置：5 项
 
 ## Commit 证据
 
-- `b66ac3c82` 2026-06-23T19:02:27+08:00：Harden PDF question-image edit quality gates
-- `d20006ac8` 2026-06-23T18:02:50+08:00：Make edit-chain P3 require asset-edit evidence
-- `b9e431c60` 2026-06-23T17:47:58+08:00：Gate asset-edit conformance with OCR readback
-- `9118cf7e2` 2026-06-23T17:14:58+08:00：Make scoped Qwen asset-edit conformance pass
-- `b4ab1de3d` 2026-06-23T16:36:18+08:00：Make asset-edit text targets contract evidence
-- `4c9496265` 2026-06-23T16:18:18+08:00：Require OCR readback in edit-chain evidence
-- `4b43bf045` 2026-06-23T16:03:06+08:00：Gate asset edit text drafts with OCR readback
-- `c05db57ab` 2026-06-23T15:39:25+08:00：Expose semantic readiness for asset edits
-- `a40f02163` 2026-06-23T15:38:43+08:00：Constrain public PDF crop DPI ceiling
-- `82e47c5f1` 2026-06-23T15:24:43+08:00：Block erased text in Qwen image edit drafts
+- `b14d7819e` 2026-09-03T09:02:07+08:00：Merge remote-tracking branch 'origin/pr212' into local-preview-211-212
+- `0a1f7e01f` 2026-09-03T00:59:33Z：!211 Phase 1: 小讲师题图链身份治理（模型网关+控制台）
+- `f0824825f` 2026-09-03T00:58:43Z：!209 保留 Silver 24 题图基线 r6：修复验证与 #206 严格合同冒烟
+- `27efca291` 2026-09-03T08:49:02+08:00：Phase 1(评审第2轮 P1 修复·补): 零增长收口——AdminApp 恢复基线/前端自取数
+- `509adc9af` 2026-09-03T08:44:13+08:00：Phase 1(评审第2轮 P1 修复): 身份缺失阻断/fail-fast/v1 契约校验/reload 回放/脚本 AsyncClient
 
 ## 工作区样例
 
-- `M` `design/04-前端与协作/在线排版前端对接实施方案.md`
-- `M` `design/06-工程落地/PDF链路代码审视与技术债清单.md`
-- `M` `design/06-工程落地/当前对外API文档.md`
-- `M` `edu_agent/app/api/routes_workbooks.py`
-- `M` `edu_agent/app/storage/repositories/workbooks.py`
-- `M` `edu_agent/app/tasks/worker.py`
-- `M` `edu_agent/app/workbooks/schemas.py`
-- `M` `scripts/check_pdf_architecture_gates.py`
-- `M` `scripts/check_pdf_package_boundaries.py`
-- `M` `scripts/public_pdf_quality_env_report.py`
-- `M` `scripts/report_pdf_quality_freeze_evidence_gap.py`
-- `M` `scripts/verify_public_pdf_question_crop_quality_env.py`
-- `M` `tests/integration/test_workbooks.py`
-- `M` `tests/unit/test_pdf_architecture_gates.py`
-- `M` `tests/unit/test_pdf_package_boundaries.py`
-- `M` `tests/unit/test_pdf_quality_freeze.py`
-- `M` `tests/unit/test_pdf_quality_freeze_evidence_gap.py`
-- `M` `tests/unit/test_public_pdf_quality_env_script.py`
-- `M` `tests/unit/test_verify_public_pdf_question_crop_quality_env.py`
-- `??` `edu_agent/app/workbooks/crop_sync.py`
-- 另有 3 项未展开。
+- `M` `configs/model_registry.prompt-lab-debug-tutor.yaml`
+- `M` `configs/model_registry.test-vision.yaml`
+- `M` `configs/model_runtime.test.yaml`
+- `M` `edu_agent/__init__.py`
+- `D` `edu_agent/app/__init__.py`
+- `D` `edu_agent/app/admin/__init__.py`
+- `D` `edu_agent/app/admin/access_control_schemas.py`
+- `D` `edu_agent/app/admin/alert_state.py`
+- `D` `edu_agent/app/admin/assets/login.html`
+- `D` `edu_agent/app/admin/audit.py`
+- `D` `edu_agent/app/admin/auth.py`
+- `D` `edu_agent/app/admin/capabilities.py`
+- `D` `edu_agent/app/admin/capabilities_registry.py`
+- `D` `edu_agent/app/admin/conversation_governance_capabilities.py`
+- `D` `edu_agent/app/admin/data_scope.py`
+- `D` `edu_agent/app/admin/identity_schemas.py`
+- `D` `edu_agent/app/admin/local_session.py`
+- `D` `edu_agent/app/admin/prepared_question_read_access.py`
+- `D` `edu_agent/app/admin/schemas.py`
+- `D` `edu_agent/app/admin/services/__init__.py`
+- 另有 1319 项未展开。
 
 ## 证据来源
 
-- 项目进展巡检: `85_运行记录/项目进展巡检-edu-agent-2026-06-23-2033.md`
-- 建议分析: `85_运行记录/建议分析-2026-06-23-0716-2.md`
+- 项目进展巡检: `85_运行记录/项目进展巡检-edu-agent-2026-09-28-2034.md`
+- 建议分析: `85_运行记录/建议分析-2026-09-28-0715-2.md`
 - 项目文件: `10_项目/edu-agent/任务清单.md`
 - 项目文件: `10_项目/edu-agent/决策记录.md`
 - 项目文件: `10_项目/edu-agent/问题清单.md`

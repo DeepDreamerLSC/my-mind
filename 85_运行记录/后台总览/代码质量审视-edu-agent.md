@@ -3,9 +3,9 @@
 记录类型: 代码质量审视
 项目: edu-agent
 项目键: edu-agent
-生成时间: 2026-06-23 20:33:38 +0800
+生成时间: 2026-09-28 20:34:26 +0800
 审视模型建议: gpt-5.4 / xhigh
-质量等级: 黄色
+质量等级: 红色
 建议动作: 后端变更至少运行相关单测或接口 smoke；前端变更至少运行 lint/build 或目标页面 smoke。
 ---
 
@@ -13,21 +13,22 @@
 
 ## 总览
 
-- 质量等级：黄色
-- 结论：可以继续，但必须补验证、收敛提交边界，并人工复核风险点。
-- 近期 commit：20
-- 工作区路径：23
-- Diff 行数：1067+ / 155-
+- 质量等级：红色
+- 结论：先停下来做质量门禁和拆批，再继续新增功能。
+- 近期 commit：5
+- 工作区路径：1339
+- Diff 行数：721+ / 430288-
 - 自动修复：否
 - 自动提交：否
 
 ## 质量结论
 
-- 可以继续，但必须补验证、收敛提交边界，并人工复核风险点。
+- 先停下来做质量门禁和拆批，再继续新增功能。
 
 ## 主要风险
 
-- 变更范围中等：23 个路径，1067+/155- 行，需要明确提交边界。
+- 变更范围较大：1339 个路径，721+/430288- 行，review 容易漏掉行为回归。
+- 配置或环境相关文件有变化，需要确认没有真实凭证、生产地址或本地私有路径。
 
 ## AI 代码味道
 
@@ -39,6 +40,8 @@
 
 ## 提交前门禁
 
+- 提交前按主题拆批，避免代码、运行产物和文档混在一个 commit。
+- 配置变更必须单独 review，并确认 `.env`、token、内网地址没有进入提交。
 - 接口契约、存储路径、模型/OCR 调用和前端展示必须有一条可复核验证证据。
 
 ## 建议分批
@@ -47,51 +50,48 @@
 
 ## 需要确认
 
-- 代码变更是否回应了最新决策审视，而不是绕开它：`85_运行记录/决策审视-edu-agent-2026-06-23-2033.md`
+- 代码变更是否回应了最新决策审视，而不是绕开它：`85_运行记录/决策审视-edu-agent-2026-09-28-2034.md`
 
 ## 变更分类
 
-- 测试：8 项
-- 脚本：7 项
-- 后端代码：5 项
-- 设计文档：3 项
+- 后端代码：1327 项
+- 其他：6 项
+- 配置：5 项
+- 脚本：1 项
 
 ## Diff 统计
 
-- `tests/integration/test_workbooks.py`：347+ / 0-
-- `edu_agent/app/api/routes_workbooks.py`：130+ / 74-
-- `design/06-工程落地/当前对外API文档.md`：112+ / 16-
-- `design/06-工程落地/PDF链路代码审视与技术债清单.md`：80+ / 25-
-- `scripts/check_pdf_architecture_gates.py`：54+ / 4-
-- `tests/unit/test_public_pdf_quality_env_script.py`：53+ / 0-
-- `scripts/verify_public_pdf_question_crop_quality_env.py`：35+ / 8-
-- `tests/unit/test_pdf_quality_freeze_evidence_gap.py`：43+ / 0-
-- `scripts/report_pdf_quality_freeze_evidence_gap.py`：30+ / 12-
-- `edu_agent/app/storage/repositories/workbooks.py`：36+ / 0-
-- `tests/unit/test_verify_public_pdf_question_crop_quality_env.py`：30+ / 0-
-- `edu_agent/app/tasks/worker.py`：28+ / 0-
-- `tests/unit/test_pdf_architecture_gates.py`：21+ / 4-
-- `edu_agent/app/workbooks/schemas.py`：24+ / 0-
-- `scripts/check_pdf_package_boundaries.py`：17+ / 1-
-- `tests/unit/test_pdf_package_boundaries.py`：13+ / 4-
-- `scripts/public_pdf_quality_env_report.py`：7+ / 3-
-- `design/04-前端与协作/在线排版前端对接实施方案.md`：5+ / 4-
-- `tests/unit/test_pdf_quality_freeze.py`：2+ / 0-
+- `edu_agent/app/agents/small_lecturer/agent.py`：0+ / 4299-
+- `uv.lock`：570+ / 3145-
+- `edu_agent/app/skills/session_service.py`：0+ / 3698-
+- `edu_agent/app/teaching_context/compiler.py`：0+ / 3477-
+- `edu_agent/app/api/routes_conversations.py`：0+ / 2794-
+- `edu_agent/app/evals/small_lecturer/prompt_lab.py`：0+ / 2435-
+- `edu_agent/app/models/gateway.py`：0+ / 2333-
+- `edu_agent/app/storage/repositories/teaching_contexts.py`：0+ / 2147-
+- `edu_agent/app/operations/test_release.py`：0+ / 2133-
+- `edu_agent/app/pdf_question_crops/boundary_locators/unlimited_component_v1.py`：0+ / 2130-
+- `edu_agent/app/storage/repositories/access_control.py`：0+ / 2129-
+- `edu_agent/app/storage/repositories/prompt_lab.py`：0+ / 2126-
+- `edu_agent/app/api/admin/routes_prompt_lab.py`：0+ / 2125-
+- `edu_agent/app/pdf_question_crops/boundary_locators/runtime/openapi_compatible_presentation_helpers.py`：0+ / 2111-
+- `edu_agent/app/pdf_question_crops/boundary_locators/runtime/run_page_evidence_mvp.py`：0+ / 2099-
+- `edu_agent/app/evals/small_lecturer/prompt_lab_task_runtime.py`：0+ / 2072-
+- `edu_agent/app/evals/small_lecturer/prompt_lab_paired_evaluation.py`：0+ / 2043-
+- `edu_agent/app/evals/small_lecturer/runtime.py`：0+ / 2041-
+- `edu_agent/app/pdf_question_crops/boundary_locators/runtime/run_openapi_compatible.py`：0+ / 1965-
+- `edu_agent/app/evals/small_lecturer/prepared_question_candidate.py`：0+ / 1954-
+- 另有 1307 项未展开。
 
 ## Commit 证据
 
-- `b66ac3c82` 2026-06-23T19:02:27+08:00：Harden PDF question-image edit quality gates
-- `d20006ac8` 2026-06-23T18:02:50+08:00：Make edit-chain P3 require asset-edit evidence
-- `b9e431c60` 2026-06-23T17:47:58+08:00：Gate asset-edit conformance with OCR readback
-- `9118cf7e2` 2026-06-23T17:14:58+08:00：Make scoped Qwen asset-edit conformance pass
-- `b4ab1de3d` 2026-06-23T16:36:18+08:00：Make asset-edit text targets contract evidence
-- `4c9496265` 2026-06-23T16:18:18+08:00：Require OCR readback in edit-chain evidence
-- `4b43bf045` 2026-06-23T16:03:06+08:00：Gate asset edit text drafts with OCR readback
-- `c05db57ab` 2026-06-23T15:39:25+08:00：Expose semantic readiness for asset edits
-- `a40f02163` 2026-06-23T15:38:43+08:00：Constrain public PDF crop DPI ceiling
-- `82e47c5f1` 2026-06-23T15:24:43+08:00：Block erased text in Qwen image edit drafts
+- `b14d7819e` 2026-09-03T09:02:07+08:00：Merge remote-tracking branch 'origin/pr212' into local-preview-211-212
+- `0a1f7e01f` 2026-09-03T00:59:33Z：!211 Phase 1: 小讲师题图链身份治理（模型网关+控制台）
+- `f0824825f` 2026-09-03T00:58:43Z：!209 保留 Silver 24 题图基线 r6：修复验证与 #206 严格合同冒烟
+- `27efca291` 2026-09-03T08:49:02+08:00：Phase 1(评审第2轮 P1 修复·补): 零增长收口——AdminApp 恢复基线/前端自取数
+- `509adc9af` 2026-09-03T08:44:13+08:00：Phase 1(评审第2轮 P1 修复): 身份缺失阻断/fail-fast/v1 契约校验/reload 回放/脚本 AsyncClient
 
 ## 证据来源
 
 - 代码仓库：`/Users/linsuchang/Desktop/work/edu-agent`
-- 决策审视：`85_运行记录/决策审视-edu-agent-2026-06-23-2033.md`
+- 决策审视：`85_运行记录/决策审视-edu-agent-2026-09-28-2034.md`

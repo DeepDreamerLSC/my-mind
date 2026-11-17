@@ -1,0 +1,29 @@
+{
+  "action_type": "阅读",
+  "inventory": {
+    "pending_confirmations": 1,
+    "sent_waiting_feedback": 80,
+    "unread": 84
+  },
+  "items": [
+    {
+      "action": "阅读",
+      "reason": "已真实发送，等待阅读反馈",
+      "source": "00_收件箱/2026-06-11 小红书 - OpenAI团队成员分享的Codex神级Prompt.md",
+      "title": "OpenAI团队成员分享的Codex神级Prompt"
+    },
+    {
+      "action": "阅读",
+      "reason": "已真实发送，等待阅读反馈",
+      "source": "00_收件箱/2026-06-11 小红书 - 如何打造高级感视觉？这份提示词建议收藏.md",
+      "title": "如何打造高级感视觉？这份提示词建议收藏"
+    },
+    {
+      "action": "阅读",
+      "reason": "已真实发送，等待阅读反馈",
+      "source": "00_收件箱/2026-06-16 前沿情报 - Customer Ignite Talk Antonio Bravo Acin (Global Head of AI Transformation, BBVA).md",
+      "title": "Customer Ignite Talk: Antonio Bravo Acin (Global Head of AI Transformation, BBVA) & OpenAI"
+    }
+  ],
+  "version": 1
+}

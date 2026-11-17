@@ -3,7 +3,7 @@
 记录类型: 决策审视
 项目: 个人数据资产系统
 项目键: my-mind
-生成时间: 2026-06-23 20:33:31 +0800
+生成时间: 2026-09-28 20:34:20 +0800
 审视模型建议: gpt-5.4 / xhigh
 最高风险: 高
 建议动作: 把任务清单压缩成 3 个以内的本周最小动作。
@@ -18,7 +18,7 @@
 - 风险等级：高
 - 结论：需要先收敛方向和工作区，再继续扩大实现。
 - 近期 commit：5
-- 工作区改动：166
+- 工作区改动：1424
 - 项目文件：7
 - 自动修改项目文件：否
 
@@ -26,25 +26,26 @@
 
 - 当前阶段仍然是「试运行和闭环打磨阶段」，继续投入应服务于：让本地知识库、OpenClaw 前台和 Codex 后台形成稳定的输入、分拣、沉淀、项目反馈闭环。
 - 近期 commit 和工作区变化能够代表真实进展，而不是只代表自动化产物增加。
+- 继续新增 skill 会降低而不是增加系统摩擦。
 - 项目巡检判断：判断置信度：中
 - 项目巡检判断：Codex 判断：优先收敛后台自动化和前台触达闭环，再扩大资料规模。
-- 项目巡检判断：长期知识目录有新增入口或候选内容，说明资料从输入层向可复用知识层移动。
+- 项目巡检判断：项目管理承载文件有更新，项目进度、证据和周报开始进入知识库结构。
 
 ## 反方视角
 
+- 反方意见：当前瓶颈也许不是 skill 数量，而是哪些输出真正能改变你的项目决策。
 - 反方意见：如果今天只允许做一件事，最可能产生价值的是验证一个真实使用闭环，而不是继续完善框架。
 
 ## 偏航风险
 
 - 任务清单未完成项较多，容易把忙碌误认为推进。
-- 运行状态变化远多于系统规则变化，可能是在维护流水线而不是改善用户决策质量。
 - 输入流转和长期知识同时变化，需要确认哪些是候选，哪些已经真的化为己有。
-- 工作区已有 166 个未提交改动，当前决策横跨多个批次。
+- 工作区已有 1424 个未提交改动，当前决策横跨多个批次。
 - 近期已有 commit 但工作区仍未闭合，项目结论可能跨越多个未复核上下文。
 
 ## 机会成本
 
-- 继续沿当前路径投入，会推迟一次更小范围的验收和复盘。
+- 继续扩展后台能力会占用项目执行注意力，推迟真正使用和复盘。
 
 ## 下个最小可逆动作
 
@@ -54,7 +55,7 @@
 
 ## 现在先别做
 
-- 暂时不要把新增报告数量当作项目质量。
+- 暂停新增低频自动化，先观察现有驾驶舱和前台提醒是否真的触达你。
 
 ## OpenClaw 可提醒问题
 
@@ -63,46 +64,50 @@
 
 ## 证据概览
 
-- 运行记录：137 项
-- 输入流转：25 项
-- 长期知识：4 项
+- 运行记录：1314 项
+- 输入流转：70 项
+- 技能自动化：22 项
+- 其他：10 项
+- 长期知识：5 项
+- 规则文档：2 项
+- 项目管理：1 项
 
 ## Commit 证据
 
+- `cb0312d` 2026-07-14T16:22:01+08:00：Prevent stale OpenClaw daily prompts from recurring
+- `cd9e486` 2026-06-24T00:00:25+08:00：Record daily operating evidence
+- `e3b13a5` 2026-06-24T00:00:08+08:00：Close the knowledge flow batch
 - `44bcdab` 2026-06-19T01:17:40+08:00：Record external review state
 - `1c027ef` 2026-06-19T01:16:49+08:00：Add external review gates
-- `eb35fbb` 2026-06-17T22:29:38+08:00：Record backend operating state
-- `a7b4c05` 2026-06-17T22:28:10+08:00：Stabilize my-mind backend governance
-- `ce3c01a` 2026-06-15T22:52:07+08:00：Refresh clean backend dashboard snapshot
 
 ## 工作区样例
 
-- `M` `"00_收件箱/2026-06-12 前沿情报 - Agentic AI What Leaders Wish They Knew Sooner.md"`
-- `M` `"00_收件箱/2026-06-13 前沿情报 - The CODE Challenge Finale When the system has to pay off.md"`
-- `M` `"00_收件箱/2026-06-13 前沿情报 - The Economics of AI Usage and What's Next For SaaS Benedict Evans on a16z.md"`
-- `M` `05_流转区/10_待读/收件箱待读队列.md`
-- `M` `05_流转区/30_待沉淀/收件箱待沉淀队列.md`
-- `M` `05_流转区/40_待核验/收件箱待核验队列.md`
-- `M` `05_流转区/40_待核验/解析质量修复队列.md`
-- `M` `05_流转区/40_待核验/飞书发布待补全队列.md`
-- `M` `05_流转区/50_待确认/待确认队列.md`
-- `M` `05_流转区/当前流转总览.md`
-- `M` `"20_资料库/管理与组织/2026-06-14 真正的一把手，是管理经营领袖三位一体#团队管理#管理者干货#人才管理#管理决策.md"`
-- `M` `75_提示词库/前端与视觉/如何打造高级感视觉？这份提示词建议收藏.md`
-- `M` `"75_提示词库/收集与录入/黄仁勋给年轻人的建议：要学习如何用AI #dou上热门 #英语口语 #英语演讲 #英语 #黄仁勋.md"`
-- `M` `75_提示词库/萃取与整理/OpenAI团队成员分享的Codex神级Prompt.md`
-- `M` `85_运行记录/前台反馈队列.jsonl`
-- `M` `85_运行记录/前台推送状态.json`
-- `M` `85_运行记录/后台总览/OpenClaw待提醒.md`
-- `M` `85_运行记录/后台总览/代码质量审视-edu-agent.md`
-- `M` `85_运行记录/后台总览/代码质量审视-my-mind.md`
-- `M` `85_运行记录/后台总览/代码质量审视.md`
-- 另有 146 项未展开。
+- `M` `.codex/lib/frontdesk_delivery.py`
+- `M` `.codex/skills/backend-control/SKILL.md`
+- `M` `.codex/skills/feishu-publish/SKILL.md`
+- `M` `.codex/skills/feishu-publish/scripts/build_openclaw_feishu_message.py`
+- `M` `.codex/skills/feishu-publish/scripts/prepare_openclaw_feishu_message.py`
+- `M` `.codex/skills/feishu-publish/scripts/publish_frontdesk_bundle.py`
+- `M` `.codex/skills/feishu-sync/SKILL.md`
+- `M` `.codex/skills/frontdesk-feedback/SKILL.md`
+- `M` `.codex/skills/frontdesk-feedback/scripts/append_frontdesk_feedback.py`
+- `M` `.codex/skills/frontdesk-push/SKILL.md`
+- `M` `.codex/skills/frontdesk-push/scripts/generate_frontdesk_push.py`
+- `M` `.codex/skills/frontier-watch/SKILL.md`
+- `M` `.codex/skills/frontier-watch/references/sources.json`
+- `M` `.codex/skills/frontier-watch/scripts/frontier_watch.py`
+- `M` `.codex/skills/inbox-capture/SKILL.md`
+- `M` `.codex/skills/inbox-capture/scripts/capture_link.py`
+- `M` `.codex/skills/inbox-triage/SKILL.md`
+- `M` `.codex/skills/inbox-triage/scripts/triage_inbox.py`
+- `M` `.gitignore`
+- `M` `"00_收件箱/2026-06-11 抖音 - 读懂管理底层逻辑，轻松激活团队.md"`
+- 另有 1404 项未展开。
 
 ## 证据来源
 
-- 项目进展巡检: `85_运行记录/项目进展巡检-my-mind-2026-06-23-2033.md`
-- 建议分析: `85_运行记录/建议分析-2026-06-23-0716-2.md`
+- 项目进展巡检: `85_运行记录/项目进展巡检-my-mind-2026-09-28-2034.md`
+- 建议分析: `85_运行记录/建议分析-2026-09-28-0715-2.md`
 - 项目文件: `10_项目/个人数据资产系统/任务清单.md`
 - 项目文件: `10_项目/个人数据资产系统/决策记录.md`
 - 项目文件: `10_项目/个人数据资产系统/问题清单.md`

@@ -1,0 +1,12 @@
+{
+  "actions": {
+    "ffbecaec83e133512d1ac80eab8d9ed7d2871ef7bd4a3d79e468b9527e87bc44": {
+      "action_type": "阅读",
+      "channel": "飞书",
+      "idempotency_key": "today-action-4e4ce6678ab17ecbf72f452ec46fbadf0fd97e4861b42eda1879d06557288970",
+      "sent_at": "2026-08-28T07:02:00+08:00",
+      "stage": "sent"
+    }
+  },
+  "version": 1
+}
