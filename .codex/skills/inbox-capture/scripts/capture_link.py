@@ -3974,11 +3974,14 @@ def prepare_douyin_media(
     backend: str = "auto",
     image_ocr: bool = True,
     extract_content_mode: str = "auto",
+    max_transcribe_seconds: int = 0,
 ) -> str:
     """抖音类型判定与媒体准备：图集逐张 OCR、视频下载校验；返回待清理的缓存内容编号。
 
     image_ocr=False 时跳过图片下载与逐张 OCR；extract_content_mode=="never" 时跳过视频下载与 ffprobe
-    （媒体直链与时长沿用 dtk 元数据），都不产生需要清理的缓存目录。
+    （媒体直链与时长沿用 dtk 元数据），都不产生需要清理的缓存目录。max_transcribe_seconds>0 且元数据时长
+    已超上限（M5：该视频将进入分段转写队列）时同样跳过下载与 ffprobe——媒体由执行器续跑时一次性下载，
+    避免「先全量下载→入队→立刻删除」的双倍下载。
     """
     work_type = douyin_work_type(info)
     info["work_type"] = work_type
@@ -4008,6 +4011,10 @@ def prepare_douyin_media(
     content_id = douyin_media_cache_id(info)
     if extract_content_mode == "never":
         # --no-extract-content：不下载视频、不 ffprobe；笔记的 视频媒体链接 与 时长 直接取 dtk 元数据。
+        return ""
+    if max_transcribe_seconds and media_duration_seconds(info) > max_transcribe_seconds:
+        # M5：元数据时长已超一段式上限 → 将进入分段转写队列；视频媒体链接与时长取 dtk 元数据，
+        # 不在采集侧下载（避免下载后入队立刻删除的双倍流量）。
         return ""
     prepare_douyin_video_media(info, content_id)
     return content_id
@@ -4131,8 +4138,13 @@ def build_modality_coverage(
     image_count: int,
     image_ocr: dict[str, Any] | None,
     content_extract: dict[str, Any] | None,
+    segmented_transcript_state: str = "",
 ) -> str:
-    """生成「模态覆盖」字段：文案/图片OCR/转写/画面解析；批次 4 前转写只标 已完成/未开始。"""
+    """生成「模态覆盖」字段：文案/图片OCR/转写/画面解析。
+
+    批次 4 起排队分段转写的长视频标 转写=未开始(分段)；进行中百分比与完成 100% 由
+    segmented_transcribe.py 回写笔记时直接更新该字段的转写片段。
+    """
     parts = [f"文案={'完整' if str(description or '').strip() else '缺失'}"]
     if work_type == "图文":
         processed = intish(image_ocr.get("processed_count")) if image_ocr else 0
@@ -4140,7 +4152,12 @@ def build_modality_coverage(
         parts.append("转写=不适用")
     elif work_type in {"口播视频", "UI演示视频"}:
         parts.append("图片OCR=不适用")
-        parts.append("转写=已完成" if content_extract else "转写=未开始")
+        if content_extract:
+            parts.append("转写=已完成")
+        elif segmented_transcript_state:
+            parts.append(f"转写={segmented_transcript_state}")
+        else:
+            parts.append("转写=未开始")
     else:
         parts.append("图片OCR=未开始")
         parts.append("转写=未开始")
@@ -4534,11 +4551,14 @@ def prepare_xhs_media(
     backend: str = "auto",
     image_ocr: bool = True,
     extract_content_mode: str = "auto",
+    max_transcribe_seconds: int = 0,
 ) -> str:
     """小红书类型判定与媒体准备：图文（兜底补全后）全量逐张 OCR、视频下载校验；返回待清理的缓存笔记编号。
 
     image_ocr=False 时跳过图片下载与逐张 OCR；extract_content_mode=="never" 时跳过视频下载与 ffprobe
-    （媒体直链与时长沿用服务元数据），都不产生需要清理的缓存目录。
+    （媒体直链与时长沿用服务元数据），都不产生需要清理的缓存目录。max_transcribe_seconds>0 且元数据时长
+    已超上限（M5：该视频将进入分段转写队列）时同样跳过下载与 ffprobe——媒体由执行器续跑时一次性下载，
+    避免「先全量下载→入队→立刻删除」的双倍下载。
     """
     work_type = xiaohongshu_work_type(info)
     info["work_type"] = work_type
@@ -4566,6 +4586,10 @@ def prepare_xhs_media(
     note_id = xiaohongshu_media_cache_id(info)
     if extract_content_mode == "never":
         # --no-extract-content：不下载视频、不 ffprobe；笔记的 视频媒体链接 与 时长 直接取服务元数据。
+        return ""
+    if max_transcribe_seconds and media_duration_seconds(info) > max_transcribe_seconds:
+        # M5：元数据时长已超一段式上限 → 将进入分段转写队列；视频媒体链接与时长取服务元数据，
+        # 不在采集侧下载（避免下载后入队立刻删除的双倍流量）。
         return ""
     prepare_xhs_video_media(info, note_id)
     return note_id
@@ -5104,6 +5128,7 @@ def attach_content_extract(
     language: str,
     command_template: str,
     max_seconds: int,
+    platform: str = "",
 ) -> None:
     if info.get("content_extract") or info.get("content_extract_error"):
         return
@@ -5118,7 +5143,25 @@ def attach_content_extract(
         return
     duration_seconds = media_duration_seconds(info)
     if duration_seconds and duration_seconds > max_seconds:
-        info["content_extract_error"] = f"视频时长 {fmt_duration(duration_seconds)} 超过转写上限 {fmt_duration(max_seconds)}"
+        # M2：分段转写执行器只支持抖音/小红书的媒体重取；其他平台（YouTube/B站/TikTok 等）不入队，
+        # 保持批次 4 之前的「超过转写上限」干净错误，避免入队后在执行器必然失败的假告警。
+        effective_platform = platform or guess_platform(first_non_empty(info, ["webpage_url", "original_url"]), info)
+        if effective_platform not in {"抖音", "小红书"}:
+            info["content_extract_error"] = (
+                f"视频时长 {fmt_duration(duration_seconds)} 超过转写上限 {fmt_duration(max_seconds)}"
+            )
+            return
+        # 批次 4（设计稿子设计三）：超一段式上限的长视频不再直接放弃，初始化分段转写队列；
+        # 本命令内不开始转写（保持入箱快路径），由后台总控调用 segmented_transcribe.py 续跑。
+        info["segmented_transcript_queue"] = {
+            "duration_seconds": duration_seconds,
+            "max_transcribe_seconds": max_seconds,
+        }
+        info["content_extract_error"] = (
+            f"视频时长 {fmt_duration(duration_seconds)} 超过一段式转写上限 {fmt_duration(max_seconds)}，"
+            "长视频已进入分段转写队列，等待后台总控续跑。"
+        )
+        append_parse_notice(info, "长视频已进入分段转写队列，等待后台总控续跑。")
         return
 
     with tempfile.TemporaryDirectory(prefix="my-mind-capture-") as temp_dir_name:
@@ -5432,6 +5475,11 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
     work_type = (
         douyin_work_type(info) if platform == "抖音" else xiaohongshu_work_type(info) if platform == "小红书" else ""
     )
+    segmented_transcript_queue = (
+        info.get("segmented_transcript_queue")
+        if platform in {"抖音", "小红书"} and isinstance(info.get("segmented_transcript_queue"), dict)
+        else None
+    )
     modality_coverage = (
         build_modality_coverage(
             work_type=work_type,
@@ -5439,6 +5487,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
             image_count=len(image_urls),
             image_ocr=image_ocr,
             content_extract=content_extract,
+            segmented_transcript_state="未开始(分段)" if segmented_transcript_queue and not content_extract else "",
         )
         if platform in {"抖音", "小红书"}
         else ""
@@ -5469,6 +5518,16 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
     work_type_frontmatter = (
         [yaml_field("作品类型", work_type), yaml_field("模态覆盖", modality_coverage)] if platform in {"抖音", "小红书"} else []
     )
+    # 批次 4：超一段式上限的长视频入箱时初始化分段转写队列字段（本命令不转写，后台总控续跑）。
+    segmented_transcript_frontmatter = (
+        [
+            yaml_field("转写状态", "未开始"),
+            yaml_field("转写覆盖", "0/0秒"),
+            yaml_field("转写备注", "长视频分段转写已排队，等待后台总控续跑。"),
+        ]
+        if segmented_transcript_queue
+        else []
+    )
     body = [
         "---",
         yaml_field("类别", "收件箱"),
@@ -5484,6 +5543,7 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
         yaml_field("原始链接", url),
         yaml_field("内容编号", content_id),
         yaml_field("时长", duration),
+        *segmented_transcript_frontmatter,
         yaml_field("封面图", thumbnail),
         yaml_field("视频媒体链接", video_media_url),
         yaml_field("图片素材数", len(image_urls)),
@@ -5537,6 +5597,8 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
 
     if platform in {"抖音", "小红书"}:
         body.extend([f"- 作品类型：{work_type or '未知'}", f"- 模态覆盖：{modality_coverage}"])
+    if segmented_transcript_queue:
+        body.extend([f"- 转写状态：未开始", f"- 转写覆盖：0/0秒"])
 
     if content_quality != "可推送":
         body.extend(["", "## 质量门禁", "", quality_gate])
@@ -5861,6 +5923,7 @@ def capture_url(
                 backend=image_ocr_backend,
                 image_ocr=image_ocr,
                 extract_content_mode=extract_content_mode,
+                max_transcribe_seconds=max_transcribe_seconds,
             )
         if is_xhs and not dry_run:
             xhs_cache_id = xiaohongshu_media_cache_id(info or {})
@@ -5869,6 +5932,7 @@ def capture_url(
                 backend=image_ocr_backend,
                 image_ocr=image_ocr,
                 extract_content_mode=extract_content_mode,
+                max_transcribe_seconds=max_transcribe_seconds,
             )
         if image_ocr and info and not dry_run and guess_platform(url, info) == "小红书":
             attach_image_ocr(info, max_images=max_ocr_images, backend=image_ocr_backend)
@@ -5895,6 +5959,7 @@ def capture_url(
                 language=transcribe_language,
                 command_template=transcribe_command,
                 max_seconds=max_transcribe_seconds,
+                platform=platform,
             )
     finally:
         # 设计决策：OCR/校验/转写完成后立即删除本地媒体，笔记只留作品页链接与媒体直链。

@@ -506,6 +506,35 @@ class CaptureXhsServiceTest(unittest.TestCase):
         self.assertIn("作品类型: 口播视频", note)
         self.assertIn("转写=已完成", note)
 
+    def test_over_limit_video_skips_download_and_queues_segmented_transcription(self) -> None:
+        """M5：超一段式上限的小红书长视频不下载/ffprobe，元数据直达分段转写队列。"""
+        detail = self._video_detail(title="超长口播分享")
+        detail["作品时长"] = 400
+        fake_xhs = FakeXhsClient(detail_result=detail)
+        run_yt_dlp = mock.patch.object(self.capture, "run_yt_dlp", return_value=(None, None))
+        page = mock.patch.object(self.capture, "xiaohongshu_page_info", return_value=(None, "小红书公开页读取失败：超时"))
+        xhs_patched = mock.patch.object(self.capture, "xhs_client", fake_xhs)
+        download = mock.patch.object(self.capture, "download_ocr_image")
+        paddle = mock.patch.object(self.capture, "run_paddle_text_ocr", side_effect=fake_paddle_text_ocr)
+        extract = mock.patch.object(self.capture, "extract_audio")
+        with run_yt_dlp, page, xhs_patched, download, paddle, extract as extract_mock:
+            path = self.capture.capture_url(self.url, self.inbox)
+            note = path.read_text(encoding="utf-8")
+
+        extract_mock.assert_not_called()  # 入箱快路径：本命令不转写。
+        self.assertEqual([], fake_xhs.downloaded)  # 不下载视频。
+        self.assertEqual([], fake_xhs.probed)  # 不 ffprobe。
+        self.assertEqual([], fake_xhs.cleaned)
+        self.assertFalse(fake_xhs.media_cache_dir("65f1a2b3000000005678efab").exists())  # 无缓存目录产生。
+        self.assertIn("转写状态: 未开始", note)
+        self.assertIn("转写覆盖: 0/0秒", note)
+        self.assertIn("转写备注: 长视频分段转写已排队，等待后台总控续跑。", note)
+        self.assertIn("转写=未开始(分段)", note)
+        self.assertIn("长视频已进入分段转写队列", note)
+        self.assertIn("https://sns-video.xhscdn.test/stream/110.mp4", note)  # 视频媒体链接来自服务元数据。
+        self.assertIn("- 时长：06:40", note)
+        self.assertIn("内容质量: 需继续解析", note)
+
     def test_unknown_kind_skips_transcription_and_stays_needs_more_parsing(self) -> None:
         fake_xhs = FakeXhsClient(
             detail_result={

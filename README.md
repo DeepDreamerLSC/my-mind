@@ -790,6 +790,21 @@ docker compose -p dtk -f docker/compose.yml --profile browser up -d --wait
 - dtk 管理员密码也丢：先 `docker compose -p dtk -f docker/compose.yml exec api dtk user passwd <name>` 重置，再同步更新 `dtk.json` 的 `admin_password`。
 - XHS token 失效或重发：`cd ~/.local/services/xhs-downloader && uv run python main.py token`，新 token 必须同步写进 `xhs.json` 的 `bearer_token`。
 
+### faster-whisper venv（转写 + 长视频分段 VAD）
+
+一段式转写与长视频分段转写（`.codex/skills/inbox-capture/scripts/segmented_transcribe.py`）共用本机 venv：`~/.cache/my-mind/faster-whisper-venv`（含 `faster-whisper` 1.2.1、`numpy`、`onnxruntime`）。分段转写按语音停顿切块用的是 faster-whisper 自带的 Silero VAD（`faster_whisper.vad.get_speech_timestamps`），**不需要再装 silero-vad 等任何新依赖**；自验命令：
+
+```bash
+~/.cache/my-mind/faster-whisper-venv/bin/python -c "import numpy; from faster_whisper.vad import get_speech_timestamps; print('vad ok')"
+```
+
+venv 丢失时重建（模型 small / int8，语言自动检测）：
+
+```bash
+python3 -m venv ~/.cache/my-mind/faster-whisper-venv
+~/.cache/my-mind/faster-whisper-venv/bin/pip install "faster-whisper>=1.2"
+```
+
 ### 环境自检
 
 在仓库根目录执行，共 7 项：Docker、dtk 服务（18600 探活）、XHS 服务（18601 探活）、ffmpeg、ffprobe、`dtk.json`、`xhs.json`。退出码 0 为全部通过，1 为有缺项：

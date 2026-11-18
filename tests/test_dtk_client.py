@@ -529,6 +529,82 @@ class CaptureDouyinDtkTest(unittest.TestCase):
         self.assertEqual([], fake_dtk.downloaded)
         self.assertEqual([], fake_dtk.cleaned)
 
+    def test_over_limit_video_skips_download_and_queues_segmented_transcription(self) -> None:
+        """M5：超一段式上限的抖音长视频不再「先全量下载→入队→立刻删除」；元数据直达入队。"""
+        fake_dtk = FakeDtkClient(
+            parse_result={
+                "kind": "video",
+                "content_id": "7708714176931188002",
+                "title": "超长口播视频",
+                "desc": LONG_DESCRIPTION,
+                "duration": 400,
+                "video": {"url": "https://cdn.douyin.test/video-1.mp4"},
+            }
+        )
+        run_yt_dlp = mock.patch.object(self.capture, "run_yt_dlp", return_value=(None, None))
+        page = mock.patch.object(self.capture, "douyin_page_info", return_value=(None, "抖音公开页读取失败：超时"))
+        dtk_patched = mock.patch.object(self.capture, "dtk_client", fake_dtk)
+        extract = mock.patch.object(self.capture, "extract_audio")
+        with run_yt_dlp, page, dtk_patched, extract as extract_mock:
+            path = self.capture.capture_url(self.url, self.inbox)
+            note = path.read_text(encoding="utf-8")
+
+        extract_mock.assert_not_called()  # 入箱快路径：本命令不转写。
+        self.assertEqual([], fake_dtk.downloaded)  # 不下载视频。
+        self.assertEqual([], fake_dtk.probed)  # 不 ffprobe。
+        self.assertEqual([], fake_dtk.cleaned)  # 无下载则无清理。
+        self.assertFalse(fake_dtk.media_cache_dir("7708714176931188002").exists())  # 无缓存目录产生。
+        self.assertIn("转写状态: 未开始", note)
+        self.assertIn("转写覆盖: 0/0秒", note)
+        self.assertIn("转写备注: 长视频分段转写已排队，等待后台总控续跑。", note)
+        self.assertIn("转写=未开始(分段)", note)
+        self.assertIn("长视频已进入分段转写队列", note)
+        self.assertIn("https://cdn.douyin.test/video-1.mp4", note)  # 视频媒体链接来自 dtk 元数据。
+        self.assertIn("- 时长：06:40", note)  # 时长来自元数据 duration=400。
+        self.assertIn("内容质量: 需继续解析", note)
+
+    def test_within_limit_video_still_downloads_and_transcribes_one_shot(self) -> None:
+        """M5 回归：≤上限的抖音短视频仍正常下载→ffprobe→一段式转写。"""
+        fake_dtk = FakeDtkClient(
+            parse_result={
+                "kind": "video",
+                "content_id": "7708714176931188002",
+                "title": "口播视频",
+                "desc": LONG_DESCRIPTION,
+                "video": {"url": "https://cdn.douyin.test/video-1.mp4"},
+            }
+        )
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        audio_path = Path(temp_dir.name) / "media-audio.mp3"
+        audio_path.write_bytes(b"fake-audio")
+        run_yt_dlp = mock.patch.object(self.capture, "run_yt_dlp", return_value=(None, None))
+        page = mock.patch.object(self.capture, "douyin_page_info", return_value=(None, "抖音公开页读取失败：超时"))
+        dtk_patched = mock.patch.object(self.capture, "dtk_client", fake_dtk)
+        extract = mock.patch.object(self.capture, "extract_audio", return_value=(audio_path, None))
+        transcribe = mock.patch.object(
+            self.capture,
+            "transcribe_audio",
+            return_value=(
+                "短视频一段式转写文本。",
+                [{"time": "00:01", "text": "短视频一段式转写文本。"}],
+                {"backend": "faster-whisper", "model": "small", "language": "zh"},
+                None,
+            ),
+        )
+        with run_yt_dlp, page, dtk_patched, extract as extract_mock, transcribe as transcribe_mock:
+            path = self.capture.capture_url(self.url, self.inbox)
+            note = path.read_text(encoding="utf-8")
+
+        extract_mock.assert_called_once()
+        transcribe_mock.assert_called_once()
+        self.assertEqual(["https://cdn.douyin.test/video-1.mp4"], fake_dtk.downloaded)  # 短视频照常下载。
+        self.assertEqual(1, len(fake_dtk.probed))
+        self.assertIn("转写=已完成", note)
+        self.assertIn("内容摘录来源: 公开视频音频转写", note)
+        self.assertNotIn("转写状态: 未开始", note)
+        self.assertNotIn("转写=未开始(分段)", note)
+
     def test_dtk_unavailable_degrades_to_public_page_result(self) -> None:
         fake_dtk = FakeDtkClient(parse_error=FakeDtkError("无法连接自建 dtk 服务（ConnectionRefusedError(61, 'Connection refused')）。", unavailable=True))
         html_info = {
