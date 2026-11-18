@@ -545,8 +545,10 @@ python3 .codex/skills/frontier-watch/scripts/frontier_watch.py \
 | XHS-Downloader | 小红书解析 / 下载 | `http://127.0.0.1:18601`，部署于 `~/.local/services/xhs-downloader` |
 | ffmpeg / ffprobe | 抽音频、格式校验、抽帧 | brew 安装 |
 | `dtk.json` / `xhs.json` | 两个服务的本机凭据 | `~/.config/my-mind/`，不进仓库 |
+| llama-server + Qwen3-VL-8B GGUF | UI 演示视频画面解析（可选，本地视觉后端） | `http://127.0.0.1:8304`，模型在 `~/Desktop/work/models/Qwen3-VL-8B-GGUF/` |
+| `vision.json` | 画面解析后端配置（可选） | `~/.config/my-mind/vision.json`，不配置即功能未启用 |
 
-两个服务都不配开机自启，重启电脑后按「服务重启与凭据补办」小节手动拉起。
+两个服务都不配开机自启，重启电脑后按「服务重启与凭据补办」小节手动拉起；视觉解析服务同样手动拉起（见下节）。
 
 ### 前置工具
 
@@ -762,6 +764,49 @@ cookie（可选，配置后视频才有高清）：编辑 `~/.local/services/xhs
 
 `auth.*` 和 `cookie.*` 是嵌套对象，不是平铺的点号键。
 
+### 视觉解析服务（UI 演示画面解析，可选）
+
+UI 演示视频的关键画面解析（`.codex/skills/inbox-capture/scripts/keyframe_vision.py`）走本地视觉后端：本机 llama-server 加载 Qwen3-VL-8B GGUF（Q4_K_M 主模型 + Q8 mmproj 视觉投影），M5 Max/128GB 实测 12 帧解析 40 秒内完成。该功能默认关闭：不配置 `vision.json` 时采集/转写链路不受影响，`env_check.py` 显示「未配置（画面解析功能未启用）」且不算失败。
+
+用专用 llama-server 实例启动（与 8303 端口的常驻实例分开；模型路径按实际存放位置改）：
+
+```bash
+llama-server \
+  --model ~/Desktop/work/models/Qwen3-VL-8B-GGUF/Qwen3VL-8B-Instruct-Q4_K_M.gguf \
+  --mmproj ~/Desktop/work/models/Qwen3-VL-8B-GGUF/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf \
+  --host 127.0.0.1 --port 8304 --ctx-size 40960 --parallel 1 --jinja \
+  --alias Qwen3-VL-8B-GGUF
+```
+
+关键坑：`--parallel` 会把总上下文均分给每个槽位，每槽 ctx = 总 ctx / 并发数。1280px 一帧约 2850 token，12 帧一次送入需单槽 ≥36k，所以这里必须 `--parallel 1 --ctx-size 40960`。不用已有 8303 实例就是因为它以 `--parallel 4` 启动，每槽只有 8192 token，一次只装得下 2 帧。
+
+后端配置写入 `~/.config/my-mind/vision.json` 并 `chmod 600`，占位示例（`backend` 选 `local` 或 `glm`，本地优先，`glm` 段为可选备用）：
+
+```json
+{
+  "backend": "local",
+  "local": {
+    "base_url": "http://127.0.0.1:8304",
+    "model": "Qwen3-VL-8B-GGUF",
+    "note": "专用 llama-server，--parallel 1 --ctx-size 40960"
+  },
+  "glm": {
+    "api_key": "your-key",
+    "model": "glm-4.6v"
+  }
+}
+```
+
+探活与排障：
+
+```bash
+curl http://127.0.0.1:8304/health   # {"status":"ok"} 即正常
+python3 .codex/skills/inbox-capture/scripts/env_check.py  # 视觉项会探活 8304
+```
+
+- 配置为 `local` 但 llama-server 未启动时，`env_check.py` 视觉项报失败，`keyframe_vision.py` 解析也会失败并提示回看本节——先按上面命令拉起服务再重试。
+- 配置为 `glm` 时 `env_check.py` 只检查 `glm.api_key` 字段存在性（输出脱敏尾号），不发外网请求。
+
 ### 服务重启与凭据补办
 
 重启电脑后（两个服务都不配开机自启）：
@@ -807,7 +852,7 @@ python3 -m venv ~/.cache/my-mind/faster-whisper-venv
 
 ### 环境自检
 
-在仓库根目录执行，共 7 项：Docker、dtk 服务（18600 探活）、XHS 服务（18601 探活）、ffmpeg、ffprobe、`dtk.json`、`xhs.json`。退出码 0 为全部通过，1 为有缺项：
+在仓库根目录执行，共 8 项：Docker、dtk 服务（18600 探活）、XHS 服务（18601 探活）、ffmpeg、ffprobe、`dtk.json`、`xhs.json`、视觉解析后端（读 `~/.config/my-mind/vision.json`：未配置时跳过不算失败；`backend=local` 时探活 8304 `/health`，不可达计失败；`backend=glm` 时只查 `api_key` 存在性，不发外网请求）。退出码 0 为全部通过，1 为有缺项：
 
 ```bash
 python3 .codex/skills/inbox-capture/scripts/env_check.py
@@ -815,7 +860,7 @@ python3 .codex/skills/inbox-capture/scripts/env_check.py --json
 python3 .codex/skills/inbox-capture/scripts/env_check.py --skip-network
 ```
 
-`--json` 输出结构化 JSON 结果；`--skip-network` 跳过两个本机服务探活，仅检查本地依赖与配置文件。
+`--json` 输出结构化 JSON 结果；`--skip-network` 跳过本机服务探活（18600/18601 与视觉服务 8304），仅检查本地依赖与配置文件。
 
 ## 目录怎么用
 

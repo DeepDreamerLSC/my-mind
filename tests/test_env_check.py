@@ -26,6 +26,7 @@ EXPECTED_CHECK_NAMES = [
     "ffprobe",
     "dtk_config",
     "xhs_config",
+    "vision",
 ]
 
 
@@ -50,12 +51,20 @@ class FakeResponse:
         return None
 
 
-def patch_all_pass(env, *, missing_binary: str | None = None):
-    """返回一组 patcher：docker/ffmpeg/ffprobe/两个服务探活全部可控。"""
+def patch_all_pass(env, *, missing_binary: str | None = None, unreachable: str | None = None):
+    """返回一组 patcher：docker/ffmpeg/ffprobe/两个服务探活全部可控。
+
+    unreachable 指定某个探活 URL 模拟连接失败（其余 URL 仍返回 200），用于视觉服务等单项失败场景。
+    """
     def fake_which(name: str):
         if name == missing_binary:
             return None
         return f"/opt/homebrew/bin/{name}"
+
+    def fake_urlopen(url, timeout=0):
+        if url == unreachable:
+            raise urllib.error.URLError(OSError(61, "Connection refused"))
+        return FakeResponse(200)
 
     docker_ok = subprocess.CompletedProcess(args=["docker", "info"], returncode=0)
     return [
@@ -64,7 +73,7 @@ def patch_all_pass(env, *, missing_binary: str | None = None):
         mock.patch.object(
             env.urllib.request,
             "urlopen",
-            return_value=FakeResponse(200),
+            side_effect=fake_urlopen if unreachable else (lambda url, timeout=0: FakeResponse(200)),
         ),
     ]
 
@@ -191,7 +200,8 @@ class EnvCheckRunTest(unittest.TestCase):
                 results = env.run_checks(config_dir=config_dir)
         self.assertEqual(EXPECTED_CHECK_NAMES, [item["name"] for item in results])
         self.assertTrue(all(item["passed"] for item in results))
-        self.assertEqual({"total": 7, "passed": 7, "failed": 0, "skipped": 0}, env.summarize(results))
+        # vision.json 未写入 → 视觉项跳过（未配置不算失败）
+        self.assertEqual({"total": 8, "passed": 7, "failed": 0, "skipped": 1}, env.summarize(results))
 
     def test_run_checks_failure_is_reported(self) -> None:
         env = load_module()
@@ -223,7 +233,8 @@ class EnvCheckRunTest(unittest.TestCase):
                 results = env.run_checks(skip_network=True, config_dir=config_dir)
         probe.assert_not_called()
         skipped = {item["name"] for item in results if item["skipped"]}
-        self.assertEqual({"dtk", "xhs"}, skipped)
+        # dtk、xhs 探活跳过；vision.json 未配置同样跳过
+        self.assertEqual({"dtk", "xhs", "vision"}, skipped)
         self.assertEqual(0, env.summarize(results)["failed"])
 
     def test_config_service_url_reads_base_url_with_fallbacks(self) -> None:
@@ -281,6 +292,161 @@ class EnvCheckRunTest(unittest.TestCase):
         )
 
 
+class EnvCheckVisionTest(unittest.TestCase):
+    """视觉解析后端探活：vision.json 缺省/local/glm/--skip-network 四类行为。"""
+
+    def write_vision(self, config_dir: Path, payload: object) -> Path:
+        path = config_dir / "vision.json"
+        path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    def test_missing_vision_config_skips_without_failure(self) -> None:
+        """vision.json 不存在 → 跳过项，输出「未配置（画面解析功能未启用）」，不计入失败。"""
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = env.check_vision_backend(Path(temp_dir) / "vision.json")
+        self.assertEqual("vision", result["name"])
+        self.assertTrue(result["skipped"])
+        self.assertTrue(result["passed"])
+        self.assertIn("未配置（画面解析功能未启用）", result["detail"])
+
+    def test_missing_vision_config_in_run_checks_never_fails(self) -> None:
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            for name in ("dtk.json", "xhs.json"):
+                (config_dir / name).write_text("{}", encoding="utf-8")
+            patchers = patch_all_pass(env)
+            with contextlib.ExitStack() as stack:
+                for patcher in patchers:
+                    stack.enter_context(patcher)
+                results = env.run_checks(config_dir=config_dir)
+        vision = next(item for item in results if item["name"] == "vision")
+        self.assertTrue(vision["skipped"])
+        self.assertEqual(0, env.summarize(results)["failed"])
+
+    def test_local_backend_probes_health_endpoint_and_passes(self) -> None:
+        """backend=local → 探活 {base_url}/health；配置了 base_url 用配置值。"""
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(
+                Path(temp_dir),
+                {"backend": "local", "local": {"base_url": "http://127.0.0.1:28304/"}},
+            )
+            with mock.patch.object(env, "check_http_service", return_value=(True, "服务有响应（HTTP 200）")) as probe:
+                result = env.check_vision_backend(path)
+        probe.assert_called_once_with("http://127.0.0.1:28304/health")
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["skipped"])
+        self.assertIn("HTTP 200", result["detail"])
+
+    def test_local_backend_falls_back_to_default_port_and_fails_when_unreachable(self) -> None:
+        """local 段缺失 base_url → 回退默认 8304；服务不可达 → 该项失败。"""
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(Path(temp_dir), {"backend": "local"})
+            with mock.patch.object(env, "check_http_service", return_value=(False, "无法连接（Connection refused）")) as probe:
+                result = env.check_vision_backend(path)
+        probe.assert_called_once_with("http://127.0.0.1:8304/health")
+        self.assertFalse(result["passed"])
+        self.assertFalse(result["skipped"])
+        self.assertIn("无法连接", result["detail"])
+        self.assertIn("llama-server", result["detail"])
+
+    def test_local_backend_unreachable_counts_as_exit_failure(self) -> None:
+        """配置存在但服务不可达 → 计入 failed（退出码 1 的来源）。"""
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_dir = Path(temp_dir)
+            for name in ("dtk.json", "xhs.json"):
+                (config_dir / name).write_text("{}", encoding="utf-8")
+            self.write_vision(config_dir, {"backend": "local"})
+            patchers = patch_all_pass(env, unreachable="http://127.0.0.1:8304/health")
+            with contextlib.ExitStack() as stack:
+                for patcher in patchers:
+                    stack.enter_context(patcher)
+                results = env.run_checks(config_dir=config_dir)
+        failed = [item["name"] for item in results if not item["passed"]]
+        self.assertEqual(["vision"], failed)
+        self.assertEqual(1, env.summarize(results)["failed"])
+
+    def test_glm_backend_only_checks_api_key_presence_without_network(self) -> None:
+        """backend=glm → 只查 glm.api_key 存在性，不发外网请求；只报「已配置」，不显示尾 4 位（L5）。"""
+        env = load_module()
+        secret = "glm-secret-key-abcdef123456"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(Path(temp_dir), {"backend": "glm", "glm": {"api_key": secret, "model": "glm-4.6v"}})
+            with mock.patch.object(env.urllib.request, "urlopen") as urlopen:
+                result = env.check_vision_backend(path)
+        urlopen.assert_not_called()
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["skipped"])
+        self.assertIn("api_key 已配置", result["detail"])
+        self.assertNotIn(secret, result["detail"])
+        self.assertNotIn("3456", result["detail"])  # L5：不显示脱敏尾号（对齐 dtk/xhs 惯例）
+        self.assertIn("未发外网请求", result["detail"])
+
+    def test_missing_backend_field_defaults_to_local_not_failure(self) -> None:
+        """L4：backend 字段缺失 → 与 keyframe_vision.load_vision_config 一致按 local 默认处理，不算解析失败。"""
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(Path(temp_dir), {"local": {"base_url": "http://127.0.0.1:28304"}})
+            with mock.patch.object(env, "check_http_service", return_value=(True, "服务有响应（HTTP 200）")) as probe:
+                result = env.check_vision_backend(path)
+        probe.assert_called_once_with("http://127.0.0.1:28304/health")
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["skipped"])
+
+    def test_glm_backend_fails_when_api_key_missing(self) -> None:
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(Path(temp_dir), {"backend": "glm", "glm": {"model": "glm-4.6v"}})
+            result = env.check_vision_backend(path)
+        self.assertFalse(result["passed"])
+        self.assertIn("api_key 缺失或为空", result["detail"])
+
+    def test_invalid_vision_json_or_backend_fails(self) -> None:
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            bad = Path(temp_dir) / "vision.json"
+            bad.write_text("{not-json", encoding="utf-8")
+            result = env.check_vision_backend(bad)
+            self.assertFalse(result["passed"])
+            self.assertIn("不是合法 JSON", result["detail"])
+            path = self.write_vision(Path(temp_dir), {"backend": "unknown"})
+            result = env.check_vision_backend(path)
+            self.assertFalse(result["passed"])
+            self.assertIn("仅支持 local/glm", result["detail"])
+
+    def test_skip_network_skips_local_vision_probe_without_failure(self) -> None:
+        """--skip-network：local 后端的视觉探活跳过且不算失败（与 dtk/xhs 语义一致）。"""
+        env = load_module()
+        probe = mock.Mock(side_effect=AssertionError("离线模式不应发起视觉服务探活"))
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(Path(temp_dir), {"backend": "local", "local": {"base_url": "http://127.0.0.1:8304"}})
+            with mock.patch.object(env, "check_http_service", probe):
+                result = env.check_vision_backend(path, skip_network=True)
+        probe.assert_not_called()
+        self.assertTrue(result["skipped"])
+        self.assertTrue(result["passed"])
+        self.assertIn("已跳过视觉服务探活", result["detail"])
+
+    def test_skip_network_glm_key_check_still_runs(self) -> None:
+        """glm 只查 key 存在性、不发网络，离线模式下仍执行。"""
+        env = load_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = self.write_vision(Path(temp_dir), {"backend": "glm", "glm": {"api_key": "your-key"}})
+            result = env.check_vision_backend(path, skip_network=True)
+        self.assertTrue(result["passed"])
+        self.assertFalse(result["skipped"])
+
+    def test_mask_secret_keeps_only_last_four_chars(self) -> None:
+        env = load_module()
+        self.assertEqual("****3456", env.mask_secret("abcdef123456"))
+        self.assertEqual("****", env.mask_secret("abcd"))
+        self.assertEqual("****", env.mask_secret("  "))
+
+
 class EnvCheckCliTest(unittest.TestCase):
     """命令行输出结构、密钥脱敏与退出码。"""
 
@@ -307,7 +473,7 @@ class EnvCheckCliTest(unittest.TestCase):
         self.assertIn("ok", payload)
         self.assertTrue(payload["ok"])
         self.assertIn("summary", payload)
-        self.assertEqual({"total": 7, "passed": 7, "failed": 0, "skipped": 0}, payload["summary"])
+        self.assertEqual({"total": 8, "passed": 7, "failed": 0, "skipped": 1}, payload["summary"])
         self.assertEqual(EXPECTED_CHECK_NAMES, [item["name"] for item in payload["checks"]])
         for item in payload["checks"]:
             self.assertEqual({"name", "label", "passed", "skipped", "detail"}, set(item.keys()))
@@ -353,7 +519,8 @@ class EnvCheckCliTest(unittest.TestCase):
         self.assertEqual(0, code)
         payload = json.loads(stdout.getvalue())
         self.assertTrue(payload["ok"])
-        self.assertEqual(2, payload["summary"]["skipped"])
+        # dtk、xhs 探活跳过 + vision.json 未配置跳过
+        self.assertEqual(3, payload["summary"]["skipped"])
 
     def test_secret_values_never_leak_into_any_output(self) -> None:
         env = load_module()
