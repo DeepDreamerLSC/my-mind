@@ -447,11 +447,11 @@ class CaptureXhsServiceTest(unittest.TestCase):
         self.assertIn("内容质量: 需继续解析", note)
         self.assertIn("图片尚未全部处理", note)
 
-    def test_full_ocr_respects_total_cap_of_20_images(self) -> None:
-        fake_xhs = FakeXhsClient(detail_result=self._album_detail(22))
+    def test_full_ocr_respects_total_cap_of_32_images(self) -> None:
+        fake_xhs = FakeXhsClient(detail_result=self._album_detail(40))
         note, _ = self._run_capture(fake_xhs)
 
-        self.assertIn("模态覆盖: 文案=完整 | 图片OCR=20/22 | 转写=不适用 | 画面解析=未开始", note)
+        self.assertIn("模态覆盖: 文案=完整 | 图片OCR=32/40 | 转写=不适用 | 画面解析=未开始", note)
         self.assertIn("内容质量: 需继续解析", note)
         self.assertIn("图片尚未全部处理", note)
 
