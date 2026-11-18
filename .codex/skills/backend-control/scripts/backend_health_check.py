@@ -71,6 +71,10 @@ WORKTREE_CATEGORY_ACTIONS = {
     "docs": "随设计或使用说明批次提交",
     "other": "人工判断归属后再提交",
 }
+SEGMENTED_TRANSCRIBE_SCRIPT = ".codex/skills/inbox-capture/scripts/segmented_transcribe.py"
+TRANSCRIPT_RESUME_BUDGET_SECONDS = 900
+TRANSCRIPT_RESUME_COMMAND = f"python3 {SEGMENTED_TRANSCRIBE_SCRIPT} --budget-seconds {TRANSCRIPT_RESUME_BUDGET_SECONDS}"
+TRANSCRIPT_PENDING_STATUSES = {"未开始", "进行中"}
 
 
 def now_datetime() -> str:
@@ -219,6 +223,55 @@ def inspect_inbox(inbox: Path) -> dict[str, Any]:
         "inactive_low_quality": inactive_low_quality[:12],
         "unread_count": len(unread),
         "unread": unread[:30],
+    }
+
+
+def inspect_transcript_queue(inbox: Path) -> dict[str, Any]:
+    status_counter: Counter[str] = Counter()
+    failed_items: list[dict[str, str]] = []
+    latest_in_progress: dict[str, Any] | None = None
+    latest_in_progress_mtime: float | None = None
+    total = 0
+    for path in sorted(inbox.glob("*.md")):
+        if path.name == "目录说明.md":
+            continue
+        meta = parse_frontmatter(read_text(path))
+        raw_status = meta.get("转写状态")
+        if not raw_status:
+            continue
+        total += 1
+        status = str(raw_status).strip()
+        status_counter[status] += 1
+        item = {
+            "path": repo_rel(path),
+            "title": str(meta.get("标题") or path.stem),
+            "coverage": str(meta.get("转写覆盖") or ""),
+            "note": str(meta.get("转写备注") or ""),
+        }
+        if status == "失败":
+            failed_items.append(item)
+        elif status == "进行中":
+            try:
+                mtime = path.stat().st_mtime
+            except OSError:
+                mtime = 0.0
+            if latest_in_progress_mtime is None or mtime >= latest_in_progress_mtime:
+                latest_in_progress_mtime = mtime
+                latest_in_progress = item
+    pending = sum(status_counter[status] for status in TRANSCRIPT_PENDING_STATUSES)
+    return {
+        "total": total,
+        "status": dict(status_counter),
+        "not_started": status_counter.get("未开始", 0),
+        "in_progress": status_counter.get("进行中", 0),
+        "failed": status_counter.get("失败", 0),
+        "completed": status_counter.get("已完成", 0),
+        "pending_count": pending,
+        "resume_command": TRANSCRIPT_RESUME_COMMAND,
+        "budget_seconds": TRANSCRIPT_RESUME_BUDGET_SECONDS,
+        "latest_in_progress": latest_in_progress,
+        "failed_count": len(failed_items),
+        "failed_items": failed_items[:8],
     }
 
 
@@ -756,6 +809,7 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     git = data["git"]
     decision_reviews = data.get("decision_reviews", {"reports": []})
     code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
+    transcript_queue = data.get("transcript_queue") or {}
 
     automation_errors = [automation for automation in automations if automation.get("error")]
     inactive_automations = [automation for automation in automations if str(automation.get("status") or "").upper() != "ACTIVE"]
@@ -799,6 +853,13 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         codex_items.append(f"处理 {remaining_verification} 条待解析/待核验确认事项，完成内容补全后再进入用户确认。")
     if inbox["low_quality_count"]:
         codex_items.append(f"继续处理 {inbox['low_quality_count']} 条低质量/需核验解析，优先运行解析质量修复。")
+    transcript_pending = int(transcript_queue.get("pending_count") or 0)
+    if transcript_pending:
+        codex_items.append(
+            f"分段转写队列待续跑 {transcript_pending} 条"
+            f"（未开始 {int(transcript_queue.get('not_started') or 0)}，进行中 {int(transcript_queue.get('in_progress') or 0)}），"
+            f"运行分段转写续跑（预算 {TRANSCRIPT_RESUME_BUDGET_SECONDS} 秒/次）：`{TRANSCRIPT_RESUME_COMMAND}`"
+        )
     if flow.get("待沉淀待消费", 0):
         codex_items.append(f"待沉淀队列有 {flow['待沉淀待消费']} 条可继续自动生成候选草稿并进入待确认。")
     elif flow.get("已有候选待确认", 0):
@@ -842,6 +903,9 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
         risks.append(f"工作区有 {git.get('dirty_count', 0)} 个未提交改动{detail}。")
     if inbox["low_quality_count"]:
         risks.append(f"{inbox['low_quality_count']} 条内容质量仍需核验，推送和转正前要继续门禁。")
+    transcript_failed = int(transcript_queue.get("failed") or 0)
+    if transcript_failed:
+        risks.append(f"分段转写失败 {transcript_failed} 条，需人工核验。")
     high_decisions = [item for item in decision_reviews.get("reports", []) if item.get("level") == "高"]
     red_quality = [item for item in code_quality_reviews.get("reports", []) if item.get("level") == "红色"]
     if high_decisions:
@@ -856,7 +920,14 @@ def build_digest(data: dict[str, Any]) -> dict[str, Any]:
     if automation_errors or push_state.get("error"):
         level = "红色"
         summary = "存在配置或状态文件异常，需要 Codex 优先排查。"
-    elif confirmations["pending_count"] or confirmations.get("verification_count") or feedback["pending_count"] or inbox["low_quality_count"] or unexpected_inactive_automations:
+    elif (
+        confirmations["pending_count"]
+        or confirmations.get("verification_count")
+        or feedback["pending_count"]
+        or inbox["low_quality_count"]
+        or unexpected_inactive_automations
+        or transcript_failed
+    ):
         level = "黄色"
         summary = "后台链路可运行，但存在待确认、待核验或待消费事项。"
     else:
@@ -899,6 +970,7 @@ def build_dashboard(data: dict[str, Any]) -> str:
     git = data["git"]
     decision_reviews = data.get("decision_reviews", {"reports": []})
     code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
+    transcript_queue = data.get("transcript_queue") or {}
 
     lines = [
         "# 当前后台状态",
@@ -961,15 +1033,19 @@ def build_dashboard(data: dict[str, Any]) -> str:
             "## 数字总览",
             "",
             f"- 收件箱：{inbox['total']} 条；低质量/需核验：{inbox['low_quality_count']} 条",
+            f"- 分段转写队列：待续跑 {transcript_queue.get('pending_count', 0)} 条（未开始 {transcript_queue.get('not_started', 0)} / 进行中 {transcript_queue.get('in_progress', 0)}），已完成 {transcript_queue.get('completed', 0)} 条，失败 {transcript_queue.get('failed', 0)} 条",
             f"- 流转区：待读 {flow['待读']}，待沉淀 {flow['待沉淀']}（可消费 {flow['待沉淀待消费']}，已有候选 {flow['已有候选待确认']}，待补判断 {flow['待补判断']}），待核验 {flow['待核验']}",
             f"- 待确认候选：{confirmations['pending_count']} 条",
             f"- 前台反馈待消费：{feedback['pending_count']} 条",
             f"- 已发送待反馈：{push_state.get('waiting_feedback', 0)} 条；准备冷却中：{push_state.get('cooling', 0)} 条；交付未知：{push_state.get('legacy_unknown', 0)} 条",
-            "",
-            "## 待确认候选预览",
-            "",
         ]
     )
+    transcript_latest = transcript_queue.get("latest_in_progress")
+    if transcript_latest:
+        coverage = transcript_latest.get("coverage") or "未知"
+        note = transcript_latest.get("note") or "无"
+        lines.append(f"  - 分段转写进行中最近一条：`{transcript_latest.get('path')}`，覆盖 {coverage}，备注：{note}")
+    lines.extend(["", "## 待确认候选预览", ""])
     if confirmations["pending"]:
         for index, item in enumerate(confirmations["pending"][:5], start=1):
             candidate = item.get("candidate") or "未定位候选文件"
@@ -1436,6 +1512,7 @@ def build_report(data: dict[str, Any]) -> str:
     push_state = data["push_state"]
     decision_reviews = data.get("decision_reviews", {"reports": []})
     code_quality_reviews = data.get("code_quality_reviews", {"reports": []})
+    transcript_queue = data.get("transcript_queue") or {}
     actions: list[str] = []
     if feedback["pending_count"]:
         actions.append("优先消费前台反馈队列，把用户短反馈回写到来源笔记。")
@@ -1449,6 +1526,13 @@ def build_report(data: dict[str, Any]) -> str:
         actions.append("待沉淀队列主要是已有候选，OpenClaw 负责提醒确认，Codex 不重复生成候选。")
     if flow.get("待补判断", 0):
         actions.append("待补判断条目先补解析或人工判断，不直接进入沉淀消费。")
+    if transcript_queue.get("pending_count"):
+        actions.append(
+            f"分段转写队列待续跑 {transcript_queue['pending_count']} 条，"
+            f"运行分段转写续跑（预算 {TRANSCRIPT_RESUME_BUDGET_SECONDS} 秒/次）：`{TRANSCRIPT_RESUME_COMMAND}`；长视频分几天跑完属预期。"
+        )
+    if transcript_queue.get("failed"):
+        actions.append(f"分段转写失败 {transcript_queue['failed']} 条，需人工核验后再决定重试或放弃。")
     if not actions:
         actions.append("后台链路暂无明显阻塞，保持现有自动化频率。")
 
@@ -1465,6 +1549,7 @@ def build_report(data: dict[str, Any]) -> str:
         f"- 已发送待反馈：{push_state.get('waiting_feedback', 0)}",
         f"- 旧版交付未知：{push_state.get('legacy_unknown', 0)}",
         f"- 低质量或需核验条目：{inbox['low_quality_count']}",
+        f"- 分段转写队列：未开始 {transcript_queue.get('not_started', 0)} / 进行中 {transcript_queue.get('in_progress', 0)} / 失败 {transcript_queue.get('failed', 0)}（续跑预算 {TRANSCRIPT_RESUME_BUDGET_SECONDS} 秒/次）",
         "",
         "## 建议动作",
         "",
@@ -1482,6 +1567,16 @@ def build_report(data: dict[str, Any]) -> str:
     lines.append(f"- 处理状态：{json.dumps(inbox['status'], ensure_ascii=False)}")
     lines.append(f"- 解析状态：{json.dumps(inbox['parse_status'], ensure_ascii=False)}")
     lines.append(f"- 内容质量：{json.dumps(inbox['quality'], ensure_ascii=False)}")
+    if transcript_queue.get("total"):
+        lines.append(f"- 转写状态：{json.dumps(transcript_queue.get('status', {}), ensure_ascii=False)}")
+        transcript_latest = transcript_queue.get("latest_in_progress")
+        if transcript_latest:
+            coverage = transcript_latest.get("coverage") or "未知"
+            note = transcript_latest.get("note") or "无"
+            lines.append(f"- 进行中最近一条：`{transcript_latest.get('path')}`，覆盖 {coverage}，备注：{note}")
+        for item in transcript_queue.get("failed_items", []):
+            note = item.get("note") or "无备注"
+            lines.append(f"- 转写失败：`{item['path']}`，{note}")
     if inbox["low_quality"]:
         lines.extend(["", "### 需关注条目", ""])
         for item in inbox["low_quality"][:8]:
@@ -1575,6 +1670,7 @@ def collect(args: argparse.Namespace) -> dict[str, Any]:
         "generated_at": now_datetime(),
         "automations": load_automations(automations_dir),
         "inbox": inspect_inbox(inbox),
+        "transcript_queue": inspect_transcript_queue(inbox),
         "flow": inspect_flow(flow_dir),
         "feedback": inspect_feedback(feedback_queue),
         "confirmations": inspect_confirmations(confirmation_queue),
