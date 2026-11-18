@@ -70,6 +70,7 @@ XHS_IMAGE_OCR_FULL_MAX_IMAGES = 32
 DOUYIN_IMAGE_OCR_MAX_IMAGES = 32
 UI_DEMO_KEYWORDS: tuple[str, ...] = ("演示", "操作", "教程", "界面", "tutorial", "how to")
 DOUYIN_UI_DEMO_KEYWORDS = UI_DEMO_KEYWORDS  # 兼容别名：抖音/小红书共用同一组关键词，避免两处维护。
+KEYFRAME_VISION_COMMAND = "python3 .codex/skills/inbox-capture/scripts/keyframe_vision.py"  # L8：唯一定义处；segmented_transcribe.keyframe_vision_command() 按需引用
 DOUYIN_IMAGE_MAX_BYTES = 64 * 1024 * 1024
 DOUYIN_VIDEO_MAX_BYTES = 1024 * 1024 * 1024
 XHS_VIDEO_MAX_BYTES = 1024 * 1024 * 1024
@@ -4861,20 +4862,33 @@ def media_duration_seconds(info: dict[str, Any]) -> int:
         return 0
 
 
-def extract_audio(media_url: str, output_dir: Path) -> tuple[Path | None, str | None]:
-    if not shutil.which("ffmpeg"):
-        return None, "未找到 ffmpeg，无法从视频抽取音频"
-    audio_path = output_dir / "media-audio.mp3"
-    command = [
+def is_http_url(value: str) -> bool:
+    """输入是否 http(s) URL（本地媒体路径/直链文件不算）。"""
+    return str(value or "").lower().startswith(("http://", "https://"))
+
+
+def audio_extract_command(media_url: str, audio_path: Path) -> list[str]:
+    """构造 ffmpeg 抽音频命令。
+
+    -user_agent/-headers 是 HTTP 协议选项：仅对 http(s) URL 输入附加；dtk/xhs 下载到
+    缓存目录的本地 mp4 输入加了会让 ffmpeg 8 报 Option user_agent not found，一段式
+    转写对本地媒体全部失败（实测阻断，必修 1）。
+    """
+    protocol_options: list[str] = []
+    if is_http_url(media_url):
+        protocol_options = [
+            "-user_agent",
+            DOUYIN_MOBILE_HEADERS["User-Agent"],
+            "-headers",
+            "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\n",
+        ]
+    return [
         "ffmpeg",
         "-y",
         "-hide_banner",
         "-loglevel",
         "error",
-        "-user_agent",
-        DOUYIN_MOBILE_HEADERS["User-Agent"],
-        "-headers",
-        "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8\r\n",
+        *protocol_options,
         "-i",
         media_url,
         "-vn",
@@ -4886,6 +4900,13 @@ def extract_audio(media_url: str, output_dir: Path) -> tuple[Path | None, str | 
         "48k",
         str(audio_path),
     ]
+
+
+def extract_audio(media_url: str, output_dir: Path) -> tuple[Path | None, str | None]:
+    if not shutil.which("ffmpeg"):
+        return None, "未找到 ffmpeg，无法从视频抽取音频"
+    audio_path = output_dir / "media-audio.mp3"
+    command = audio_extract_command(media_url, audio_path)
     result = subprocess.run(
         command,
         cwd=ROOT,
@@ -5198,6 +5219,10 @@ def attach_content_extract(
         "timeline": build_transcript_timeline(segments),
         "excerpt": summary["excerpt"],
     }
+    if str(info.get("work_type") or "") == "UI演示视频":
+        # 批次 5：一段式转写成功的 UI 演示视频提示画面解析待执行（capture 内不直接调用，保持入箱快路径；
+        # 模态覆盖保持 画面解析=未开始，由 keyframe_vision.py 回写）。
+        append_parse_notice(info, f"画面解析待执行：{KEYFRAME_VISION_COMMAND}")
 
 
 def merge_info(base: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -5366,6 +5391,7 @@ def assess_content_quality(
     youtube_subtitle: dict[str, Any] | None,
     external_transcript: dict[str, Any] | None,
     work_type: str = "",
+    vision_status: str = "",
 ) -> tuple[str, str]:
     """Return a coarse quality gate for downstream triage and frontdesk push."""
     if parse_status == "解析失败":
@@ -5403,7 +5429,18 @@ def assess_content_quality(
         return "需继续解析", f"{reason} 不应直接进入前台阅读推送。"
 
     if platform in {"抖音", "小红书"} and work_type == "UI演示视频":
-        # 设计稿子设计四：批次 5 视觉分析落地前，UI 演示视频的画面解析恒为未开始，转写完成也不进入推送。
+        # 批次 5（设计稿子设计四/五规则表）：按笔记「画面解析」状态分流——
+        # 完成(N帧) 且转写完整 → 可推送；仅OCR降级/部分帧失败但有观察 → 需核验；未开始/失败 → 需继续解析。
+        status = str(vision_status or "").strip() or "未开始"
+        if status.startswith("完成"):
+            return "可推送", "UI 演示视频转写与画面解析均已完成，可进入分拣和前台阅读候选。"
+        if status == "仅OCR降级" or status.startswith("部分"):
+            return "需核验", "UI 演示视频的画面解析为降级/部分结果（仅OCR观察或部分帧失败），沉淀前需要人工核验关键帧描述。"
+        if status == "失败":
+            return "需继续解析", "UI 演示视频的画面解析失败（可重跑 keyframe_vision.py），不应直接进入前台阅读推送。"
+        if status == "不适用":
+            # L11：画面解析=不适用（非 UI 演示/已人工判定）时不落「等待画面解析」话术，提示人工核验类型。
+            return "需核验", "UI 演示视频的画面解析为不适用（视觉确认判定非软件界面或已人工判定），画面解析不会执行；请人工核验作品类型，如确为 UI 演示可改判后重跑。"
         return "需继续解析", "UI 演示视频的画面解析尚未执行（视觉分析批次缓后），转写完成也不进入推送，等待画面解析或人工改判作品类型。"
 
     if is_xhs_image and not has_image_ocr:
@@ -5516,7 +5553,15 @@ def build_note(url: str, info: dict[str, Any] | None, error: str | None, reading
 
     filename = sanitize_filename_part(f"{now_date()} {platform} - {title}") + ".md"
     work_type_frontmatter = (
-        [yaml_field("作品类型", work_type), yaml_field("模态覆盖", modality_coverage)] if platform in {"抖音", "小红书"} else []
+        [
+            yaml_field("作品类型", work_type),
+            # 评审 M2 配套：入箱即写明类型来源=启发式（dtk kind/关键词启发式判定），
+            # 视觉确认只改写启发式来源的类型；老笔记缺该字段则视为来源未知、不改写。
+            yaml_field("作品类型来源", "启发式"),
+            yaml_field("模态覆盖", modality_coverage),
+        ]
+        if platform in {"抖音", "小红书"}
+        else []
     )
     # 批次 4：超一段式上限的长视频入箱时初始化分段转写队列字段（本命令不转写，后台总控续跑）。
     segmented_transcript_frontmatter = (

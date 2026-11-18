@@ -85,6 +85,11 @@ ACTIVE_STATUSES = (STATUS_PENDING, STATUS_RUNNING)
 MEDIA_SUFFIXES = (".mp4", ".mp3", ".m4a", ".wav", ".mov", ".webm", ".flv", ".aac", ".ogg", ".mpga")
 SAFE_CACHE_ID_RE = re.compile(r"[0-9A-Za-z._-]+")
 
+
+def keyframe_vision_command() -> str:
+    """画面解析 CLI 命令字面量（L8：唯一定义在 capture_link.KEYFRAME_VISION_COMMAND，按需加载）。"""
+    return str(_capture_link().KEYFRAME_VISION_COMMAND)
+
 _monotonic = time.monotonic  # 测试可替换的时钟
 _capture_link_module: Any | None = None
 
@@ -1118,6 +1123,8 @@ def finalize_note(note: InboxNote, state: dict[str, Any], platform: str, content
         youtube_subtitle=None,
         external_transcript=None,
         work_type=note.field("作品类型") or "",
+        # 批次 5 门禁打通：UI 演示视频按笔记「画面解析」状态分流（完成→可推送；降级→需核验；未开始/失败→需继续解析）。
+        vision_status=note.field("画面解析") or "未开始",
     )
 
     done, total = coverage_seconds(state)
@@ -1127,6 +1134,9 @@ def finalize_note(note: InboxNote, state: dict[str, Any], platform: str, content
         f"分段转写完成：{len(blocks)}/{len(state['segments'])} 块，覆盖 {coverage_text(done, total)}（≥98%）。"
         + (f"剩余 {len(pending)} 块（约 {int(round(sum(b['sp'] for b in pending)))} 秒语音）不足 2%，按完整判定收尾。" if pending else "")
     )
+    if (note.field("作品类型") or "") == "UI演示视频":
+        # 批次 5：分段转写收尾后提示画面解析待执行（本脚本不直接调用视觉模型，保持转写职责单一）。
+        remark += f" 画面解析待执行：{keyframe_vision_command()}。"
 
     note.set_field("转写状态", STATUS_DONE)
     note.set_field("转写覆盖", coverage_text(done, total))

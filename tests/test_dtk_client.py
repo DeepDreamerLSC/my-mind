@@ -906,5 +906,45 @@ class CaptureDouyinDtkTest(unittest.TestCase):
         self.assertIn("画面解析尚未执行", reason)
 
 
+class ExtractAudioCommandTest(unittest.TestCase):
+    """必修 1：extract_audio 的 ffmpeg 命令——HTTP 协议选项只对 http(s) URL 输入附加。
+
+    dtk/xhs 下载到缓存目录的本地 mp4 输入加 -user_agent 会让 ffmpeg 8 报
+    Option user_agent not found，一段式转写对本地媒体全失败（实测阻断）。
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.capture = load_module(CAPTURE_SCRIPT, "test_dtk_extract_audio_module")
+
+    def test_local_media_path_command_has_no_protocol_options(self) -> None:
+        command = self.capture.audio_extract_command(
+            "/tmp/my-mind-cache/7704156396664769811/7704156396664769811.mp4",
+            Path("/tmp/out/media-audio.mp3"),
+        )
+        self.assertNotIn("-user_agent", command)
+        self.assertNotIn("-headers", command)
+        # 协议选项不在时 -i 直接跟在全局参数后，输入路径与输出路径保持原位。
+        self.assertEqual("/tmp/my-mind-cache/7704156396664769811/7704156396664769811.mp4", command[command.index("-i") + 1])
+        self.assertEqual(str(Path("/tmp/out/media-audio.mp3")), command[-1])
+
+    def test_http_url_command_keeps_protocol_options(self) -> None:
+        command = self.capture.audio_extract_command(
+            "https://cdn.douyin.test/video.mp4",
+            Path("/tmp/out/media-audio.mp3"),
+        )
+        self.assertIn("-user_agent", command)
+        self.assertTrue(command[command.index("-user_agent") + 1].startswith("Mozilla/5.0 (iPhone"))
+        self.assertIn("-headers", command)
+        self.assertEqual("https://cdn.douyin.test/video.mp4", command[command.index("-i") + 1])
+
+    def test_is_http_url_helper(self) -> None:
+        self.assertTrue(self.capture.is_http_url("https://cdn.douyin.test/a.mp4"))
+        self.assertTrue(self.capture.is_http_url("HTTP://cdn.douyin.test/a.mp4"))
+        self.assertFalse(self.capture.is_http_url("/tmp/cache/a.mp4"))
+        self.assertFalse(self.capture.is_http_url("tmp/cache/a.mp4"))
+        self.assertFalse(self.capture.is_http_url(""))
+
+
 if __name__ == "__main__":
     unittest.main()
